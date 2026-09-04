@@ -1,0 +1,54 @@
+@inherits LayoutComponentBase
+
+<div class="app-shell">
+    <AuthorizeView Context="shellContext">
+        <Authorized>
+            <div class="nav-overlay" onclick="toggleNav()"></div>
+            <NavMenu />
+            <main class="app-main">
+                <div class="app-topbar">
+                    <div class="topbar-left">
+                        <button type="button" class="menu-toggle" onclick="toggleNav()" title="Abrir/fechar menu" aria-label="Abrir/fechar menu">
+                            <i class="fa-solid fa-bars"></i>
+                        </button>
+                        <span class="topbar-title">RDS Monitor</span>
+                    </div>
+                    <div class="topbar-right">
+                        <button type="button" class="theme-toggle" onclick="toggleTheme()" title="Alternar tema claro/escuro" aria-label="Alternar tema">
+                            <i class="fa-solid fa-sun theme-icon-light"></i>
+                            <i class="fa-solid fa-moon theme-icon-dark"></i>
+                        </button>
+
+                        <details class="user-menu">
+                            <summary>
+                                <i class="fa-solid fa-circle-user"></i>
+                                <span>@shellContext.User.Identity?.Name</span>
+                                <span class="badge bg-secondary">@shellContext.User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value</span>
+                                <i class="fa-solid fa-chevron-down caret"></i>
+                            </summary>
+                            <div class="user-menu-dropdown">
+                                <div class="user-menu-header">
+                                    <strong>@shellContext.User.Identity?.Name</strong>
+                                    <span>@shellContext.User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value</span>
+                                </div>
+                                <form method="post" action="/api/auth/logout">
+                                    <button type="submit" class="user-menu-item">
+                                        <i class="fa-solid fa-right-from-bracket"></i> Sair
+                                    </button>
+                                </form>
+                            </div>
+                        </details>
+                    </div>
+                </div>
+                <article class="app-content">
+                    @Body
+                </article>
+            </main>
+        </Authorized>
+        <NotAuthorized>
+            <div class="app-content-full">
+                @Body
+            </div>
+        </NotAuthorized>
+    </AuthorizeView>
+</div>

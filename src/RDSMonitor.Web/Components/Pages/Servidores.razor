@@ -1,0 +1,65 @@
+@page "/servidores"
+@attribute [Authorize(Roles = "Administrador,Operador")]
+
+<PageTitle>Servidores · RDS Monitor</PageTitle>
+
+<div class="dash-header">
+    <h1>Servidores</h1>
+    <p>Inventário dos servidores RDS monitorados.</p>
+</div>
+
+<div class="toolbar">
+    <div class="toolbar-search">
+        <i class="fa-solid fa-magnifying-glass"></i>
+        <input type="text" placeholder="Buscar servidor..." disabled title="Disponível quando os dados forem reais" />
+    </div>
+    <div class="toolbar-actions">
+        <button class="btn-pill" disabled><i class="fa-solid fa-rotate"></i> Atualizar</button>
+        <AuthorizeView Roles="Administrador">
+            <Authorized>
+                <button class="btn-pill primary" disabled><i class="fa-solid fa-plus"></i> Novo</button>
+            </Authorized>
+        </AuthorizeView>
+    </div>
+</div>
+
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>Servidor</th>
+            <th>Sessões ativas</th>
+            <th>Estado</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var servidor in servidores)
+        {
+            <tr>
+                <td class="mono">@servidor.Nome</td>
+                <td class="mono">@servidor.Sessoes</td>
+                <td>
+                    <span class="status-dot @(servidor.Alerta ? "idle" : "active")"></span>
+                    @(servidor.Alerta ? "Atenção" : "Normal")
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+<p class="dash-note">
+    Ações de administração do servidor (reiniciar serviço, reiniciar
+    servidor) serão adicionadas na tela de Administração.
+</p>
+
+@code {
+    private record ServidorInfo(string Nome, int Sessoes, bool Alerta);
+
+    private readonly List<ServidorInfo> servidores = new()
+    {
+        new("RDS01", 24, false),
+        new("RDS02", 18, false),
+        new("RDS03", 13, false),
+        new("RDS04", 11, true),
+        new("RDS05", 22, false),
+    };
+}

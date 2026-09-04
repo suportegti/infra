@@ -1,0 +1,76 @@
+@page "/sessoes"
+@attribute [Authorize]
+
+<PageTitle>Sessões · RDS Monitor</PageTitle>
+
+<div class="dash-header">
+    <h1>Sessões — RDS01</h1>
+    <p>Usuários conectados neste servidor.</p>
+</div>
+
+<div class="toolbar">
+    <div class="toolbar-search">
+        <i class="fa-solid fa-magnifying-glass"></i>
+        <input type="text" placeholder="Buscar por usuário ou sessão..." disabled title="Disponível quando os dados forem reais" />
+    </div>
+    <div class="toolbar-actions">
+        <button class="btn-pill" disabled><i class="fa-solid fa-rotate"></i> Atualizar</button>
+        <button class="btn-pill" disabled><i class="fa-solid fa-filter"></i> Filtros</button>
+        <button class="btn-pill success" disabled><i class="fa-solid fa-file-export"></i> Exportar</button>
+    </div>
+</div>
+
+<AuthorizeView Context="authContext">
+    <Authorized>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Usuário</th>
+                    <th>Sessão</th>
+                    <th>Estado</th>
+                    <th>CPU</th>
+                    <th>Memória</th>
+                    <th>Ações</th>
+                </tr>
+            </thead>
+            <tbody>
+                @{ var podeAdministrar = authContext.User.IsInRole("Administrador"); }
+                @foreach (var sessao in sessoes)
+                {
+                    <tr>
+                        <td>@sessao.Usuario</td>
+                        <td class="mono">@sessao.Id</td>
+                        <td><span class="status-dot @sessao.Estado.ToLower()"></span>@sessao.Estado</td>
+                        <td class="mono">@(sessao.Cpu)%</td>
+                        <td class="mono">@(sessao.MemoriaGb) GB</td>
+                        <td class="acoes">
+                            <button class="btn-acao" disabled="@(!podeAdministrar)" title="@(podeAdministrar ? "Encerrar sessão" : "Apenas administradores")">Logoff</button>
+                            <button class="btn-acao" disabled="@(!podeAdministrar)">Disconnect</button>
+                            <button class="btn-acao" disabled="@(!podeAdministrar)">Matar processo</button>
+                            <button class="btn-acao" disabled="@(!podeAdministrar)">Mensagem</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </Authorized>
+</AuthorizeView>
+
+<p class="dash-note">
+    Ações reais serão habilitadas quando o Agente Windows estiver integrado
+    a este servidor. Por perfil: apenas o Administrador pode executar
+    logoff, disconnect, encerrar processos e reiniciar serviços; Operador e
+    Auditor têm acesso somente de visualização.
+</p>
+
+@code {
+    private record SessaoInfo(string Usuario, string Id, string Estado, int Cpu, double MemoriaGb);
+
+    private readonly List<SessaoInfo> sessoes = new()
+    {
+        new("joao.silva", "15", "Active", 15, 2.0),
+        new("marcos.souza", "20", "Idle", 40, 4.0),
+        new("carlos.lima", "25", "Active", 10, 1.0),
+        new("ana.pereira", "31", "Disconnected", 2, 0.6),
+    };
+}

@@ -1,0 +1,27 @@
+@page "/Error"
+@using System.Diagnostics
+
+<PageTitle>Erro · RDS Monitor</PageTitle>
+
+<div class="dash-header">
+    <h1>Ocorreu um erro</h1>
+    <p>Um erro inesperado ocorreu ao processar sua solicitação.</p>
+</div>
+
+@if (ShowRequestId)
+{
+    <p class="dash-note">ID da requisição: <code>@RequestId</code></p>
+}
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    private string? RequestId { get; set; }
+    private bool ShowRequestId => !string.IsNullOrEmpty(RequestId);
+
+    protected override void OnInitialized()
+    {
+        RequestId = Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+    }
+}

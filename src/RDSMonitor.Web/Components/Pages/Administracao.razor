@@ -1,0 +1,25 @@
+@page "/administracao"
+@attribute [Authorize(Roles = "Administrador")]
+
+<PageTitle>Administração · RDS Monitor</PageTitle>
+
+<div class="dash-header">
+    <h1>Administração</h1>
+    <p>Ações disponíveis para o perfil Administrador.</p>
+</div>
+
+<ul class="report-list">
+    <li>Logoff de sessão</li>
+    <li>Disconnect de sessão</li>
+    <li>Encerrar processo específico do usuário</li>
+    <li>Enviar mensagem para usuário</li>
+    <li>Shadow Session (acompanhar sessão)</li>
+    <li>Encerrar processos travados</li>
+    <li>Reiniciar serviços do servidor</li>
+    <li>Reiniciar servidor</li>
+</ul>
+
+<p class="dash-note">
+    Em construção — cada ação será conectada ao Agente Windows
+    correspondente e registrada na tabela de Auditoria.
+</p>

@@ -1,0 +1,72 @@
+@page "/login"
+
+<PageTitle>Entrar · RDS Monitor</PageTitle>
+
+<div class="login-screen">
+    <button type="button" class="theme-toggle login-theme-toggle" onclick="toggleTheme()" title="Alternar tema claro/escuro" aria-label="Alternar tema">
+        <i class="fa-solid fa-sun theme-icon-light"></i>
+        <i class="fa-solid fa-moon theme-icon-dark"></i>
+    </button>
+
+    <div class="login-card">
+        <div class="login-mark">
+            <i class="fa-solid fa-server"></i>
+        </div>
+
+        <h1>Bem-vindo!</h1>
+        <p class="login-subtitle">Acesse sua conta para continuar</p>
+
+        @if (Erro == "1")
+        {
+            <div class="login-alert" role="alert">
+                Usuário ou senha inválidos.
+            </div>
+        }
+
+        <form method="post" action="/api/auth/login">
+            <input type="hidden" name="returnUrl" value="@ReturnUrl" />
+
+            <label class="field" for="username">
+                <i class="fa-solid fa-user"></i>
+                <input id="username" name="username" type="text" placeholder="Usuário" autocomplete="username" required autofocus />
+            </label>
+
+            <label class="field" for="password">
+                <i class="fa-solid fa-lock"></i>
+                <input id="password" name="password" type="password" placeholder="Senha" autocomplete="current-password" required />
+            </label>
+
+            <div class="login-options">
+                <label class="remember-me">
+                    <input type="checkbox" name="lembrarMe" />
+                    Lembrar-me
+                </label>
+                <button type="button" class="forgot-password" disabled title="Disponível em uma próxima etapa">
+                    Esqueci minha senha
+                </button>
+            </div>
+
+            <button type="submit" class="btn-entrar">ENTRAR</button>
+        </form>
+
+        <p class="login-hint">
+            Acesso via Active Directory / Entra ID será habilitado em uma
+            próxima etapa. Por enquanto, utilize um dos usuários de
+            demonstração informados pela equipe de TI (perfis Administrador,
+            Operador e Auditor).
+        </p>
+    </div>
+
+    <div class="login-footer">
+        <i class="fa-solid fa-server"></i>
+        <span>Powered by <strong>RDS Monitor</strong></span>
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    private string? ReturnUrl { get; set; }
+
+    [SupplyParameterFromQuery(Name = "erro")]
+    private string? Erro { get; set; }
+}

@@ -1,0 +1,37 @@
+@page "/usuarios"
+@attribute [Authorize(Roles = "Administrador")]
+
+<PageTitle>Usuários do Sistema · RDS Monitor</PageTitle>
+
+<div class="dash-header">
+    <h1>Usuários do sistema</h1>
+    <p>Perfis de acesso ao painel RDS Monitor.</p>
+</div>
+
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>Perfil</th>
+            <th>Permissões</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td class="mono">Administrador</td>
+            <td>Logoff, disconnect, encerrar processo, reiniciar servidor</td>
+        </tr>
+        <tr>
+            <td class="mono">Operador</td>
+            <td>Visualizar sessões e servidores</td>
+        </tr>
+        <tr>
+            <td class="mono">Auditor</td>
+            <td>Apenas consultar relatórios e histórico</td>
+        </tr>
+    </tbody>
+</table>
+
+<p class="dash-note">
+    Em construção — o cadastro e a edição de usuários serão adicionados
+    nesta tela, com auditoria completa das alterações.
+</p>

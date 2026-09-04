@@ -1,0 +1,86 @@
+@page "/"
+@attribute [Authorize]
+
+<PageTitle>Dashboard · RDS Monitor</PageTitle>
+
+<div class="dash-header">
+    <h1>Dashboard</h1>
+    <p>Visão geral dos servidores RDS monitorados.</p>
+</div>
+
+<section class="summary-grid">
+    <div class="summary-card">
+        <div class="summary-icon icon-blue"><i class="fa-solid fa-hard-drive"></i></div>
+        <div class="summary-body">
+            <span class="summary-title">Servidores online</span>
+            <span class="summary-value">@totalServidores</span>
+            <a class="summary-link" href="servidores">Ver todos <i class="fa-solid fa-arrow-right"></i></a>
+        </div>
+    </div>
+    <div class="summary-card">
+        <div class="summary-icon icon-green"><i class="fa-solid fa-desktop"></i></div>
+        <div class="summary-body">
+            <span class="summary-title">Sessões ativas</span>
+            <span class="summary-value">@totalSessoes</span>
+            <a class="summary-link" href="sessoes">Ver todas <i class="fa-solid fa-arrow-right"></i></a>
+        </div>
+    </div>
+    <div class="summary-card">
+        <div class="summary-icon icon-amber"><i class="fa-solid fa-triangle-exclamation"></i></div>
+        <div class="summary-body">
+            <span class="summary-title">Servidores em alerta</span>
+            <span class="summary-value">@servidores.Count(s => s.Alerta)</span>
+            <a class="summary-link" href="servidores">Ver todos <i class="fa-solid fa-arrow-right"></i></a>
+        </div>
+    </div>
+</section>
+
+<section class="quick-actions">
+    <h2><i class="fa-solid fa-bolt"></i> Ações Rápidas</h2>
+    <div class="quick-actions-row">
+        <a class="btn-pill primary" href="sessoes">
+            <i class="fa-solid fa-desktop"></i> Ver Sessões
+        </a>
+        <a class="btn-pill" href="servidores">
+            <i class="fa-solid fa-hard-drive"></i> Ver Servidores
+        </a>
+        <button class="btn-pill" disabled title="Disponível em uma próxima etapa">
+            <i class="fa-solid fa-bell"></i> Configurar Alertas
+        </button>
+    </div>
+</section>
+
+<section class="server-grid">
+    @foreach (var servidor in servidores)
+    {
+        <a class="server-card @(servidor.Alerta ? "is-alert" : "")" href="sessoes">
+            <div class="server-card-top">
+                <span class="status-dot @(servidor.Alerta ? "idle" : "active")"></span>
+                <span class="server-name">@servidor.Nome</span>
+            </div>
+            <span class="server-count">@servidor.Sessoes</span>
+            <span class="server-label">usuários conectados</span>
+        </a>
+    }
+</section>
+
+<p class="dash-note">
+    Dados de demonstração — serão substituídos pela coleta em tempo real
+    assim que o Agente Windows for instalado nos servidores RDS.
+</p>
+
+@code {
+    private record ServidorResumo(string Nome, int Sessoes, bool Alerta);
+
+    private readonly List<ServidorResumo> servidores = new()
+    {
+        new("RDS01", 24, false),
+        new("RDS02", 18, false),
+        new("RDS03", 13, false),
+        new("RDS04", 11, true),
+        new("RDS05", 22, false),
+    };
+
+    private int totalServidores => servidores.Count;
+    private int totalSessoes => servidores.Sum(s => s.Sessoes);
+}

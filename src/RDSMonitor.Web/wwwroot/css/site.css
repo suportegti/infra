@@ -1,0 +1,962 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+:root {
+    --font-display: 'Space Grotesk', 'Inter', sans-serif;
+    --font-body: 'Inter', sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+/* Tema escuro (padrão) — console de operações / sala de servidores. */
+:root,
+:root[data-theme="dark"] {
+    --bg: #10161f;
+    --surface: #182233;
+    --surface-alt: #1f2c40;
+    --border: #2c3b52;
+    --text: #e7ecf3;
+    --text-muted: #8ca0bc;
+    --accent: #e8a33d;
+    --accent-contrast: #1a1206;
+
+    --status-active: #3ddc97;
+    --status-idle: #e8a33d;
+    --status-disconnected: #6b7a93;
+    --status-alert: #e85d4f;
+
+    --shadow: 0 20px 45px rgba(0, 0, 0, 0.35);
+}
+
+/* Tema claro — mesma estrutura, fundo claro. */
+:root[data-theme="light"] {
+    --bg: #eef1f6;
+    --surface: #ffffff;
+    --surface-alt: #f3f5f9;
+    --border: #dde3ec;
+    --text: #182233;
+    --text-muted: #5b6b84;
+    --accent: #b06a12;
+    --accent-contrast: #ffffff;
+
+    --status-active: #1f9d68;
+    --status-idle: #b06a12;
+    --status-disconnected: #7c8aa0;
+    --status-alert: #c94433;
+
+    --shadow: 0 16px 35px rgba(30, 41, 59, 0.12);
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: var(--font-body);
+    background: var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+}
+
+a {
+    color: inherit;
+    text-decoration: none;
+}
+
+h1,
+h2,
+h3,
+h4 {
+    font-family: var(--font-display);
+}
+
+::selection {
+    background: rgba(232, 163, 61, 0.3);
+}
+
+:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+/* Cabeçalho e nota padrão usados em várias telas internas */
+.dash-header h1 {
+    margin: 0 0 0.25rem;
+    font-size: 1.5rem;
+}
+
+.dash-header p {
+    margin: 0 0 1.5rem;
+    color: var(--text-muted);
+}
+
+.dash-note {
+    margin-top: 1.5rem;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.report-list {
+    list-style: none;
+    margin: 0 0 1.5rem;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-width: 420px;
+}
+
+.report-list li {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    font-size: 0.9rem;
+}
+
+/* Tabela de dados compartilhada (Sessões, Servidores, Usuários) */
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.data-table th {
+    text-align: left;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    padding: 0.65rem 1rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.data-table td {
+    padding: 0.65rem 1rem;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.88rem;
+}
+
+.data-table tr:last-child td {
+    border-bottom: none;
+}
+
+.mono {
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+}
+
+.acoes {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+
+.btn-acao {
+    background: var(--surface-alt);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 5px;
+    padding: 0.3rem 0.55rem;
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+.btn-acao:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* Indicador de estado (sessão/servidor) */
+.status-dot {
+    display: inline-block;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    margin-right: 0.4rem;
+}
+
+.status-dot.active {
+    background: var(--status-active);
+}
+
+.status-dot.idle {
+    background: var(--status-idle);
+}
+
+.status-dot.disconnected {
+    background: var(--status-disconnected);
+}
+
+/* Pequenos ajustes sobre o Bootstrap, usado apenas para utilitários pontuais */
+.badge {
+    font-size: 0.72rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+}
+
+.bg-secondary {
+    background: var(--surface-alt) !important;
+    color: var(--text-muted) !important;
+}
+
+/* ===================== Barra de ações / busca (toolbar) ===================== */
+.toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    margin-bottom: 1.25rem;
+}
+
+.toolbar-search {
+    flex: 1;
+    min-width: 220px;
+    position: relative;
+}
+
+.toolbar-search i {
+    position: absolute;
+    left: 0.85rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-muted);
+    font-size: 0.8rem;
+}
+
+.toolbar-search input {
+    width: 100%;
+    padding: 0.55rem 0.9rem 0.55rem 2.2rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 0.88rem;
+}
+
+.toolbar-search input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+.toolbar-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.btn-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.5rem 0.9rem;
+    border-radius: 7px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: filter 120ms ease, border-color 120ms ease;
+    font-family: var(--font-body);
+}
+
+.btn-pill:hover {
+    border-color: var(--accent);
+}
+
+.btn-pill:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.btn-pill.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-contrast);
+}
+
+.btn-pill.success {
+    background: var(--status-active);
+    border-color: var(--status-active);
+    color: #04241a;
+}
+
+.btn-pill.danger {
+    background: var(--status-alert);
+    border-color: var(--status-alert);
+    color: #330a05;
+}
+
+.btn-pill.neutral {
+    background: var(--surface-alt);
+}
+
+/* ===================== Grupo retrátil do menu lateral ===================== */
+.nav-group {
+    border-top: 1px solid var(--border);
+    padding-top: 0.5rem;
+    margin-top: 0.25rem;
+}
+
+.nav-group summary {
+    list-style: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.5rem 0.7rem;
+    border-radius: 6px;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+}
+
+.nav-group summary::-webkit-details-marker {
+    display: none;
+}
+
+.nav-group summary:hover {
+    color: var(--text);
+}
+
+.nav-group summary .chevron {
+    transition: transform 150ms ease;
+    font-size: 0.7rem;
+}
+
+.nav-group[open] summary .chevron {
+    transform: rotate(180deg);
+}
+
+.nav-group ul {
+    margin: 0.15rem 0 0;
+}
+
+/* ===================== Menu do usuário (dropdown sem JS de framework) ===================== */
+.user-menu {
+    position: relative;
+}
+
+.user-menu summary {
+    list-style: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.6rem;
+    border-radius: 7px;
+    color: var(--text-muted);
+    font-size: 0.88rem;
+}
+
+.user-menu summary::-webkit-details-marker {
+    display: none;
+}
+
+.user-menu summary:hover {
+    background: var(--surface-alt);
+    color: var(--text);
+}
+
+.user-menu .caret {
+    font-size: 0.65rem;
+    transition: transform 150ms ease;
+}
+
+.user-menu[open] .caret {
+    transform: rotate(180deg);
+}
+
+.user-menu-dropdown {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 0.5rem);
+    min-width: 220px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    padding: 0.35rem;
+    z-index: 50;
+}
+
+.user-menu-header {
+    padding: 0.55rem 0.7rem 0.6rem;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 0.35rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+
+.user-menu-header strong {
+    font-size: 0.88rem;
+    color: var(--text);
+}
+
+.user-menu-header span {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.user-menu-item {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: none;
+    border: none;
+    color: var(--text);
+    font-size: 0.85rem;
+    padding: 0.5rem 0.7rem;
+    border-radius: 6px;
+    cursor: pointer;
+    text-align: left;
+    font-family: var(--font-body);
+}
+
+.user-menu-item:hover {
+    background: var(--surface-alt);
+}
+
+/* ===================== Toggle de tema ===================== */
+.theme-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.1rem;
+    height: 2.1rem;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.theme-toggle:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+[data-theme="dark"] .theme-icon-dark {
+    display: none;
+}
+
+[data-theme="light"] .theme-icon-light {
+    display: none;
+}
+
+/* ===================== Menu hambúrguer + overlay (telas estreitas) ===================== */
+.menu-toggle {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 2.1rem;
+    height: 2.1rem;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    margin-right: 0.75rem;
+}
+
+.nav-overlay {
+    display: none;
+}
+
+@media (max-width: 900px) {
+    .menu-toggle {
+        display: inline-flex;
+    }
+
+    .app-nav {
+        position: fixed;
+        inset: 0 auto 0 0;
+        transform: translateX(-100%);
+        transition: transform 200ms ease;
+        z-index: 45;
+    }
+
+    .app-shell.nav-open .app-nav {
+        transform: translateX(0);
+        box-shadow: var(--shadow);
+    }
+
+    .app-shell.nav-open .nav-overlay {
+        display: block;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.45);
+        z-index: 40;
+    }
+}
+
+/* ===================== Layout raiz (antes em MainLayout.razor.css) ===================== */
+.app-shell {
+    min-height: 100vh;
+    display: flex;
+    background: var(--bg);
+}
+
+.app-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.app-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.9rem 1.75rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: relative;
+    z-index: 20;
+}
+
+.topbar-left {
+    display: flex;
+    align-items: center;
+}
+
+.topbar-title {
+    font-family: var(--font-display);
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: var(--text);
+}
+
+.topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+.app-content {
+    flex: 1;
+    padding: 1.75rem;
+    overflow-y: auto;
+}
+
+.app-content-full {
+    flex: 1;
+    display: flex;
+}
+
+/* ===================== Menu lateral (antes em NavMenu.razor.css) ===================== */
+.app-nav {
+    width: 232px;
+    flex-shrink: 0;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 1.25rem 0.9rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.nav-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 1.05rem;
+    color: var(--text);
+    padding: 0 0.4rem;
+}
+
+.nav-brand i {
+    color: var(--accent);
+}
+
+.app-nav ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.app-nav .nav-link {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.55rem 0.7rem;
+    border-radius: 6px;
+    color: var(--text-muted);
+    font-size: 0.92rem;
+    text-decoration: none;
+    transition: background-color 120ms ease, color 120ms ease;
+}
+
+.app-nav .nav-link i {
+    width: 1.1rem;
+    text-align: center;
+    opacity: 0.85;
+}
+
+.app-nav .nav-link:hover {
+    background: var(--surface-alt);
+    color: var(--text);
+}
+
+.app-nav .nav-link.active {
+    background: var(--surface-alt);
+    color: var(--accent);
+    font-weight: 600;
+}
+
+/* ===================== Login (antes em Login.razor.css) ===================== */
+.login-screen {
+    min-height: 100vh;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1.5rem;
+    padding: 2rem 1.25rem;
+    background:
+        radial-gradient(circle at 20% 15%, rgba(232, 163, 61, 0.08), transparent 45%),
+        radial-gradient(circle at 85% 85%, rgba(61, 220, 151, 0.06), transparent 40%),
+        var(--bg);
+    position: relative;
+}
+
+.login-theme-toggle {
+    position: absolute;
+    top: 1.5rem;
+    right: 1.5rem;
+}
+
+.login-card {
+    width: 100%;
+    max-width: 400px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    padding: 2.5rem 2.25rem;
+    text-align: center;
+}
+
+.login-mark {
+    width: 3.25rem;
+    height: 3.25rem;
+    margin: 0 auto 1.25rem;
+    border-radius: 12px;
+    background: var(--surface-alt);
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.4rem;
+    color: var(--accent);
+}
+
+.login-card h1 {
+    font-family: var(--font-display);
+    font-size: 1.6rem;
+    margin: 0 0 0.35rem;
+    color: var(--text);
+}
+
+.login-subtitle {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    margin: 0 0 1.75rem;
+}
+
+.login-card form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    text-align: left;
+}
+
+.field {
+    position: relative;
+    display: block;
+}
+
+.field i {
+    position: absolute;
+    left: 0.9rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+.field input {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.7rem 0.9rem 0.7rem 2.5rem;
+    color: var(--text);
+    font-size: 0.95rem;
+}
+
+.field input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+    border-color: var(--accent);
+}
+
+.login-options {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.82rem;
+    margin-top: -0.15rem;
+}
+
+.remember-me {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.remember-me input {
+    accent-color: var(--accent);
+}
+
+.forgot-password {
+    background: none;
+    border: none;
+    color: var(--accent);
+    font-size: 0.82rem;
+    cursor: not-allowed;
+    opacity: 0.65;
+    padding: 0;
+    font-family: var(--font-body);
+}
+
+.btn-entrar {
+    margin-top: 0.5rem;
+    padding: 0.75rem 1rem;
+    border: none;
+    border-radius: 8px;
+    background: var(--accent);
+    color: var(--accent-contrast);
+    font-weight: 700;
+    font-size: 0.9rem;
+    letter-spacing: 0.03em;
+    cursor: pointer;
+    transition: filter 120ms ease;
+}
+
+.btn-entrar:hover {
+    filter: brightness(1.08);
+}
+
+.login-alert {
+    background: rgba(232, 93, 79, 0.12);
+    border: 1px solid rgba(232, 93, 79, 0.4);
+    color: #e85d4f;
+    border-radius: 8px;
+    padding: 0.6rem 0.8rem;
+    font-size: 0.85rem;
+    margin-bottom: 1.1rem;
+    text-align: left;
+}
+
+.login-hint {
+    margin-top: 1.5rem;
+    font-size: 0.76rem;
+    line-height: 1.5;
+    color: var(--text-muted);
+    text-align: left;
+}
+
+.login-footer {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+}
+
+.login-footer i {
+    color: var(--accent);
+}
+
+.login-footer strong {
+    color: var(--text);
+}
+
+/* ===================== Dashboard (antes em Home.razor.css) ===================== */
+.summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.75rem;
+}
+
+.summary-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.15rem 1.25rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.9rem;
+}
+
+.summary-icon {
+    width: 2.6rem;
+    height: 2.6rem;
+    flex-shrink: 0;
+    border-radius: 9px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.05rem;
+}
+
+.icon-blue {
+    background: rgba(90, 150, 230, 0.15);
+    color: #6fa6e8;
+}
+
+.icon-green {
+    background: rgba(61, 220, 151, 0.15);
+    color: var(--status-active);
+}
+
+.icon-amber {
+    background: rgba(232, 163, 61, 0.15);
+    color: var(--accent);
+}
+
+.summary-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+}
+
+.summary-title {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+}
+
+.summary-value {
+    font-family: var(--font-mono);
+    font-size: 1.7rem;
+    font-weight: 500;
+    color: var(--text);
+}
+
+.summary-link {
+    font-size: 0.78rem;
+    color: var(--accent);
+    margin-top: 0.25rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    text-decoration: none;
+}
+
+.summary-link i {
+    font-size: 0.7rem;
+}
+
+.quick-actions {
+    margin-bottom: 1.75rem;
+}
+
+.quick-actions h2 {
+    font-size: 1rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0 0 0.75rem;
+    color: var(--text);
+}
+
+.quick-actions h2 i {
+    color: var(--accent);
+}
+
+.quick-actions-row {
+    display: flex;
+    gap: 0.65rem;
+    flex-wrap: wrap;
+}
+
+.quick-actions-row .btn-pill {
+    padding: 0.65rem 1.1rem;
+    font-size: 0.85rem;
+    text-decoration: none;
+}
+
+.server-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 0.9rem;
+}
+
+.server-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    text-decoration: none;
+    transition: border-color 120ms ease;
+}
+
+.server-card:hover {
+    border-color: var(--accent);
+}
+
+.server-card.is-alert {
+    border-color: rgba(232, 93, 79, 0.5);
+}
+
+.server-card-top {
+    display: flex;
+    align-items: center;
+    margin-bottom: 0.4rem;
+}
+
+.server-name {
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.server-count {
+    font-family: var(--font-mono);
+    font-size: 1.6rem;
+    font-weight: 500;
+    color: var(--text);
+}
+
+.server-label {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
