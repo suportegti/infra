@@ -44,4 +44,32 @@ public class UserService : IUserService
             await _db.SaveChangesAsync();
         }
     }
+
+    public async Task<PasswordChangeResult> AlterarSenhaAsync(string username, string senhaAtual, string novaSenha)
+    {
+        if (string.IsNullOrWhiteSpace(novaSenha) || novaSenha.Length < 8)
+        {
+            return PasswordChangeResult.NovaSenhaInvalida;
+        }
+
+        var user = await _db.Users.FirstOrDefaultAsync(u =>
+            u.Username.ToLower() == username.ToLower() && u.Ativo);
+
+        if (user is null)
+        {
+            return PasswordChangeResult.CredenciaisInvalidas;
+        }
+
+        var resultado = _hasher.VerifyHashedPassword(user, user.PasswordHash, senhaAtual);
+
+        if (resultado == PasswordVerificationResult.Failed)
+        {
+            return PasswordChangeResult.CredenciaisInvalidas;
+        }
+
+        user.PasswordHash = _hasher.HashPassword(user, novaSenha);
+        await _db.SaveChangesAsync();
+
+        return PasswordChangeResult.Sucesso;
+    }
 }

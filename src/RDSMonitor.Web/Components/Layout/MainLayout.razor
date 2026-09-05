@@ -31,6 +31,9 @@
                                     <strong>@shellContext.User.Identity?.Name</strong>
                                     <span>@shellContext.User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value</span>
                                 </div>
+                                <a class="user-menu-item" href="@($"alterar-senha?usuario={Uri.EscapeDataString(shellContext.User.Identity?.Name ?? string.Empty)}")">
+                                    <i class="fa-solid fa-key"></i> Alterar senha
+                                </a>
                                 <form method="post" action="/api/auth/logout">
                                     <button type="submit" class="user-menu-item">
                                         <i class="fa-solid fa-right-from-bracket"></i> Sair

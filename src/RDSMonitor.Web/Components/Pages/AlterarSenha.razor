@@ -1,0 +1,88 @@
+@page "/alterar-senha"
+
+<PageTitle>Alterar senha · RDS Monitor</PageTitle>
+
+<div class="login-screen">
+    <button type="button" class="theme-toggle login-theme-toggle" onclick="toggleTheme()" title="Alternar tema claro/escuro" aria-label="Alternar tema">
+        <i class="fa-solid fa-sun theme-icon-light"></i>
+        <i class="fa-solid fa-moon theme-icon-dark"></i>
+    </button>
+
+    <div class="login-card">
+        <div class="login-mark">
+            <i class="fa-solid fa-key"></i>
+        </div>
+
+        <h1>Alterar senha</h1>
+        <p class="login-subtitle">Informe suas credenciais atuais e a nova senha.</p>
+
+        @if (Sucesso == "1")
+        {
+            <div class="login-alert login-alert-success" role="alert">
+                Senha alterada com sucesso. Você já pode entrar com a nova senha.
+            </div>
+        }
+        else if (Erro == "credenciais")
+        {
+            <div class="login-alert" role="alert">
+                Usuário ou senha atual inválidos.
+            </div>
+        }
+        else if (Erro == "fraca")
+        {
+            <div class="login-alert" role="alert">
+                A nova senha deve ter pelo menos 8 caracteres.
+            </div>
+        }
+        else if (Erro == "confirmacao")
+        {
+            <div class="login-alert" role="alert">
+                A confirmação não coincide com a nova senha.
+            </div>
+        }
+
+        <form method="post" action="/api/auth/change-password">
+            <label class="field" for="username">
+                <i class="fa-solid fa-user"></i>
+                <input id="username" name="username" type="text" placeholder="Usuário" value="@Usuario" autocomplete="username" required autofocus />
+            </label>
+
+            <label class="field" for="senhaAtual">
+                <i class="fa-solid fa-lock"></i>
+                <input id="senhaAtual" name="senhaAtual" type="password" placeholder="Senha atual" autocomplete="current-password" required />
+            </label>
+
+            <label class="field" for="novaSenha">
+                <i class="fa-solid fa-key"></i>
+                <input id="novaSenha" name="novaSenha" type="password" placeholder="Nova senha (mínimo 8 caracteres)" autocomplete="new-password" minlength="8" required />
+            </label>
+
+            <label class="field" for="confirmarSenha">
+                <i class="fa-solid fa-key"></i>
+                <input id="confirmarSenha" name="confirmarSenha" type="password" placeholder="Confirmar nova senha" autocomplete="new-password" minlength="8" required />
+            </label>
+
+            <button type="submit" class="btn-entrar">SALVAR NOVA SENHA</button>
+        </form>
+
+        <p class="login-hint">
+            <a href="login">← Voltar para o login</a>
+        </p>
+    </div>
+
+    <div class="login-footer">
+        <i class="fa-solid fa-server"></i>
+        <span>Powered by <strong>RDS Monitor</strong></span>
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "sucesso")]
+    private string? Sucesso { get; set; }
+
+    [SupplyParameterFromQuery(Name = "erro")]
+    private string? Erro { get; set; }
+
+    [SupplyParameterFromQuery(Name = "usuario")]
+    private string? Usuario { get; set; }
+}

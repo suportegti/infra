@@ -99,6 +99,32 @@ app.MapPost("/api/auth/logout", async (HttpContext http) =>
     })
     .DisableAntiforgery();
 
+// Troca de senha autosserviço: exige usuário + senha atual, pois ainda não
+// há Active Directory / Entra ID integrado (sem isso não há como oferecer
+// uma recuperação por e-mail de verdade).
+app.MapPost("/api/auth/change-password", async (
+        IUserService userService,
+        [FromForm] string username,
+        [FromForm] string senhaAtual,
+        [FromForm] string novaSenha,
+        [FromForm] string confirmarSenha) =>
+    {
+        if (!string.Equals(novaSenha, confirmarSenha, StringComparison.Ordinal))
+        {
+            return Results.Redirect($"/alterar-senha?erro=confirmacao&usuario={Uri.EscapeDataString(username)}");
+        }
+
+        var resultado = await userService.AlterarSenhaAsync(username, senhaAtual, novaSenha);
+
+        return resultado switch
+        {
+            RDSMonitor.Web.Services.PasswordChangeResult.Sucesso => Results.Redirect("/alterar-senha?sucesso=1"),
+            RDSMonitor.Web.Services.PasswordChangeResult.NovaSenhaInvalida => Results.Redirect($"/alterar-senha?erro=fraca&usuario={Uri.EscapeDataString(username)}"),
+            _ => Results.Redirect($"/alterar-senha?erro=credenciais&usuario={Uri.EscapeDataString(username)}"),
+        };
+    })
+    .DisableAntiforgery();
+
 // Garante a criação do banco SQLite e insere os usuários de demonstração
 // (um por perfil) na primeira execução.
 using (var scope = app.Services.CreateScope())
