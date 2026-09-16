@@ -1,0 +1,37 @@
+@page "/perfis-usuarios"
+@attribute [Authorize(Roles = "Administrador")]
+
+<PageTitle>Perfis de Usuários · RDSManager</PageTitle>
+
+<div class="dash-header">
+    <h1>Perfis de usuários</h1>
+    <p>Permissões de cada perfil de acesso ao RDSManager.</p>
+</div>
+
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>Perfil</th>
+            <th>Permissões</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td class="mono">Administrador</td>
+            <td>Logoff, disconnect, encerrar processo, reiniciar servidor</td>
+        </tr>
+        <tr>
+            <td class="mono">Operador</td>
+            <td>Visualizar sessões e servidores</td>
+        </tr>
+        <tr>
+            <td class="mono">Auditor</td>
+            <td>Apenas consultar relatórios e histórico</td>
+        </tr>
+    </tbody>
+</table>
+
+<p class="dash-note">
+    Esses perfis são fixos no sistema. Para incluir, editar ou desabilitar
+    usuários, use a tela <a href="usuarios">Usuários do sistema</a>.
+</p>

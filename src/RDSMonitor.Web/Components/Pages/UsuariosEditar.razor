@@ -1,0 +1,77 @@
+@page "/usuarios/editar/{Id:int}"
+@attribute [Authorize(Roles = "Administrador")]
+@inject IUserService UserService
+
+<PageTitle>Editar Usuário · RDSManager</PageTitle>
+
+<div class="dash-header">
+    <h1>Editar usuário</h1>
+    <p>Atualize os dados do usuário.</p>
+</div>
+
+@if (Usuario is null)
+{
+    <p class="dash-note">
+        Usuário não encontrado. <a href="usuarios">Voltar para Usuários do sistema</a>
+    </p>
+}
+else
+{
+    @if (Erro == "senha-fraca")
+    {
+        <div class="login-alert" role="alert">A nova senha deve ter pelo menos 8 caracteres.</div>
+    }
+    else if (Erro == "dados-invalidos")
+    {
+        <div class="login-alert" role="alert">Preencha o nome de exibição corretamente.</div>
+    }
+
+    <div class="form-panel">
+        <form method="post" action="/api/usuarios/editar">
+            <input type="hidden" name="id" value="@Usuario.Id" />
+
+            <div class="form-grid">
+                <label class="field">
+                    <i class="fa-solid fa-user"></i>
+                    <input value="@Usuario.Username" disabled title="O login não pode ser alterado por aqui" />
+                </label>
+                <label class="field">
+                    <i class="fa-solid fa-id-badge"></i>
+                    <input name="displayName" value="@Usuario.DisplayName" placeholder="Nome de exibição" required />
+                </label>
+                <label class="field">
+                    <i class="fa-solid fa-user-shield"></i>
+                    <select name="profile" required>
+                        <option value="Administrador" selected="@(Usuario.Profile == UserProfile.Administrador)">Administrador</option>
+                        <option value="Operador" selected="@(Usuario.Profile == UserProfile.Operador)">Operador</option>
+                        <option value="Auditor" selected="@(Usuario.Profile == UserProfile.Auditor)">Auditor</option>
+                    </select>
+                </label>
+                <label class="field">
+                    <i class="fa-solid fa-key"></i>
+                    <input name="novaSenha" type="password" placeholder="Nova senha (deixe em branco para não alterar)" minlength="8" />
+                </label>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn-pill primary"><i class="fa-solid fa-check"></i> Salvar alterações</button>
+                <a class="btn-pill" href="usuarios">Cancelar</a>
+            </div>
+        </form>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public int Id { get; set; }
+
+    [SupplyParameterFromQuery(Name = "erro")]
+    private string? Erro { get; set; }
+
+    private AppUser? Usuario { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Usuario = await UserService.ObterPorIdAsync(Id);
+    }
+}

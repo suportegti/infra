@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using RDSMonitor.Web.Components;
 using RDSMonitor.Web.Data;
+using RDSMonitor.Web.Models;
 using RDSMonitor.Web.Services;
 using System.Security.Claims;
 
@@ -125,6 +126,69 @@ app.MapPost("/api/auth/change-password", async (
     })
     .DisableAntiforgery();
 
+// Administração de usuários do sistema (tela /usuarios). Somente
+// Administrador — reforçado aqui também, não só na página, pois estes são
+// endpoints HTTP chamáveis diretamente.
+app.MapPost("/api/usuarios/criar", async (
+        IUserService userService,
+        [FromForm] string username,
+        [FromForm] string displayName,
+        [FromForm] string profile,
+        [FromForm] string senhaInicial) =>
+    {
+        if (!Enum.TryParse<UserProfile>(profile, ignoreCase: true, out var perfil))
+        {
+            return Results.Redirect("/usuarios?erro=dados-invalidos");
+        }
+
+        var resultado = await userService.CriarAsync(username, displayName, perfil, senhaInicial);
+
+        return resultado switch
+        {
+            UserOperationResult.Sucesso => Results.Redirect("/usuarios?sucesso=criado"),
+            UserOperationResult.UsuarioJaExiste => Results.Redirect("/usuarios?erro=usuario-existe"),
+            UserOperationResult.SenhaInvalida => Results.Redirect("/usuarios?erro=senha-fraca"),
+            _ => Results.Redirect("/usuarios?erro=dados-invalidos"),
+        };
+    })
+    .RequireAuthorization(policy => policy.RequireRole("Administrador"))
+    .DisableAntiforgery();
+
+app.MapPost("/api/usuarios/editar", async (
+        IUserService userService,
+        [FromForm] int id,
+        [FromForm] string displayName,
+        [FromForm] string profile,
+        [FromForm] string? novaSenha) =>
+    {
+        if (!Enum.TryParse<UserProfile>(profile, ignoreCase: true, out var perfil))
+        {
+            return Results.Redirect($"/usuarios/editar/{id}?erro=dados-invalidos");
+        }
+
+        var resultado = await userService.EditarAsync(id, displayName, perfil, novaSenha);
+
+        return resultado switch
+        {
+            UserOperationResult.Sucesso => Results.Redirect("/usuarios?sucesso=editado"),
+            UserOperationResult.SenhaInvalida => Results.Redirect($"/usuarios/editar/{id}?erro=senha-fraca"),
+            UserOperationResult.NaoEncontrado => Results.Redirect("/usuarios?erro=nao-encontrado"),
+            _ => Results.Redirect($"/usuarios/editar/{id}?erro=dados-invalidos"),
+        };
+    })
+    .RequireAuthorization(policy => policy.RequireRole("Administrador"))
+    .DisableAntiforgery();
+
+app.MapPost("/api/usuarios/alternar-ativo", async (
+        IUserService userService,
+        [FromForm] int id) =>
+    {
+        await userService.AlternarAtivoAsync(id);
+        return Results.Redirect("/usuarios?sucesso=status");
+    })
+    .RequireAuthorization(policy => policy.RequireRole("Administrador"))
+    .DisableAntiforgery();
+
 // Garante a criação do banco SQLite e insere os usuários de demonstração
 // (um por perfil) na primeira execução.
 using (var scope = app.Services.CreateScope())
@@ -132,6 +196,31 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.EnsureCreated();
     await SeedData.EnsureSeededAsync(db);
+}
+
+// Comando de manutenção: "dotnet run -- --reset-senha-admin" redefine a
+// senha do usuário "admin" para "Rds@1234" (ou para o valor passado após o
+// "=", ex.: --reset-senha-admin=NovaSenha123) sem apagar mais nada do
+// banco, e reabilita a conta caso esteja desabilitada. Roda uma vez e
+// encerra — não sobe o servidor web.
+var comandoReset = args.FirstOrDefault(a => a.StartsWith("--reset-senha-admin", StringComparison.OrdinalIgnoreCase));
+
+if (comandoReset is not null)
+{
+    var partesComando = comandoReset.Split('=', 2);
+    var novaSenhaAdmin = partesComando.Length == 2 && !string.IsNullOrWhiteSpace(partesComando[1])
+        ? partesComando[1]
+        : "Rds@1234";
+
+    using var scopeReset = app.Services.CreateScope();
+    var userServiceReset = scopeReset.ServiceProvider.GetRequiredService<IUserService>();
+    var sucessoReset = await userServiceReset.RedefinirSenhaAsync("admin", novaSenhaAdmin);
+
+    Console.WriteLine(sucessoReset
+        ? $"Senha do usuário 'admin' redefinida para: {novaSenhaAdmin}"
+        : "Usuário 'admin' não encontrado no banco de dados.");
+
+    return;
 }
 
 app.Run();

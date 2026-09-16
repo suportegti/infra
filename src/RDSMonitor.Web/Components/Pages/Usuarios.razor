@@ -1,37 +1,137 @@
 @page "/usuarios"
 @attribute [Authorize(Roles = "Administrador")]
+@inject IUserService UserService
 
-<PageTitle>Usuários do Sistema · RDS Monitor</PageTitle>
+<PageTitle>Usuários do Sistema · RDSManager</PageTitle>
 
 <div class="dash-header">
     <h1>Usuários do sistema</h1>
-    <p>Perfis de acesso ao painel RDS Monitor.</p>
+    <p>Inclua, edite ou desabilite usuários com acesso ao RDSManager.</p>
 </div>
+
+@if (Sucesso == "criado")
+{
+    <div class="login-alert login-alert-success" role="alert">Usuário criado com sucesso.</div>
+}
+else if (Sucesso == "editado")
+{
+    <div class="login-alert login-alert-success" role="alert">Usuário atualizado com sucesso.</div>
+}
+else if (Sucesso == "status")
+{
+    <div class="login-alert login-alert-success" role="alert">Status do usuário atualizado.</div>
+}
+else if (Erro == "usuario-existe")
+{
+    <div class="login-alert" role="alert">Já existe um usuário com esse nome de login.</div>
+}
+else if (Erro == "senha-fraca")
+{
+    <div class="login-alert" role="alert">A senha inicial deve ter pelo menos 8 caracteres.</div>
+}
+else if (Erro == "dados-invalidos")
+{
+    <div class="login-alert" role="alert">Preencha todos os campos obrigatórios corretamente.</div>
+}
+else if (Erro == "nao-encontrado")
+{
+    <div class="login-alert" role="alert">Usuário não encontrado.</div>
+}
+
+<details class="form-card">
+    <summary>
+        <span><i class="fa-solid fa-user-plus"></i> Novo usuário</span>
+        <i class="fa-solid fa-chevron-down chevron"></i>
+    </summary>
+    <form method="post" action="/api/usuarios/criar">
+        <div class="form-grid">
+            <label class="field">
+                <i class="fa-solid fa-user"></i>
+                <input name="username" placeholder="Usuário (login)" required />
+            </label>
+            <label class="field">
+                <i class="fa-solid fa-id-badge"></i>
+                <input name="displayName" placeholder="Nome de exibição" required />
+            </label>
+            <label class="field">
+                <i class="fa-solid fa-user-shield"></i>
+                <select name="profile" required>
+                    <option value="Administrador">Administrador</option>
+                    <option value="Operador">Operador</option>
+                    <option value="Auditor">Auditor</option>
+                </select>
+            </label>
+            <label class="field">
+                <i class="fa-solid fa-key"></i>
+                <input name="senhaInicial" type="password" placeholder="Senha inicial (mín. 8 caracteres)" minlength="8" required />
+            </label>
+        </div>
+        <div class="form-actions">
+            <button type="submit" class="btn-pill primary"><i class="fa-solid fa-plus"></i> Criar usuário</button>
+        </div>
+    </form>
+</details>
 
 <table class="data-table">
     <thead>
         <tr>
+            <th>Usuário</th>
+            <th>Nome</th>
             <th>Perfil</th>
-            <th>Permissões</th>
+            <th>Status</th>
+            <th>Último login</th>
+            <th>Ações</th>
         </tr>
     </thead>
     <tbody>
-        <tr>
-            <td class="mono">Administrador</td>
-            <td>Logoff, disconnect, encerrar processo, reiniciar servidor</td>
-        </tr>
-        <tr>
-            <td class="mono">Operador</td>
-            <td>Visualizar sessões e servidores</td>
-        </tr>
-        <tr>
-            <td class="mono">Auditor</td>
-            <td>Apenas consultar relatórios e histórico</td>
-        </tr>
+        @foreach (var usuario in ListaUsuarios)
+        {
+            <tr>
+                <td class="mono">@usuario.Username</td>
+                <td>@usuario.DisplayName</td>
+                <td><span class="badge bg-secondary">@usuario.Profile</span></td>
+                <td>
+                    <span class="status-dot @(usuario.Ativo ? "active" : "disconnected")"></span>
+                    @(usuario.Ativo ? "Ativo" : "Desabilitado")
+                </td>
+                <td class="mono">@(usuario.UltimoLogin?.ToString("dd/MM/yyyy HH:mm") ?? "—")</td>
+                <td class="acoes">
+                    <a class="btn-pill" href="@($"usuarios/editar/{usuario.Id}")"><i class="fa-solid fa-pen"></i> Editar</a>
+                    <form method="post" action="/api/usuarios/alternar-ativo" style="display:inline">
+                        <input type="hidden" name="id" value="@usuario.Id" />
+                        <button type="submit" class="btn-pill @(usuario.Ativo ? "danger" : "success")">
+                            @if (usuario.Ativo)
+                            {
+                                <span><i class="fa-solid fa-user-slash"></i> Desabilitar</span>
+                            }
+                            else
+                            {
+                                <span><i class="fa-solid fa-user-check"></i> Habilitar</span>
+                            }
+                        </button>
+                    </form>
+                </td>
+            </tr>
+        }
     </tbody>
 </table>
 
 <p class="dash-note">
-    Em construção — o cadastro e a edição de usuários serão adicionados
-    nesta tela, com auditoria completa das alterações.
+    Ver as permissões de cada perfil em <a href="perfis-usuarios">Perfis de usuários</a>.
+    Todas as ações desta tela ficarão registradas em auditoria em uma próxima etapa.
 </p>
+
+@code {
+    [SupplyParameterFromQuery(Name = "sucesso")]
+    private string? Sucesso { get; set; }
+
+    [SupplyParameterFromQuery(Name = "erro")]
+    private string? Erro { get; set; }
+
+    private List<AppUser> ListaUsuarios { get; set; } = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        ListaUsuarios = await UserService.ListarAsync();
+    }
+}

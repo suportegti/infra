@@ -1,7 +1,7 @@
 namespace RDSMonitor.Web.Models;
 
 /// <summary>
-/// Usuário com acesso ao painel RDS Monitor. Corresponde à tabela "Users"
+/// Usuário com acesso ao painel RDSManager. Corresponde à tabela "Users"
 /// prevista no escopo do projeto.
 /// </summary>
 public class AppUser

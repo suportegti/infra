@@ -1,4 +1,4 @@
-// RDS Monitor — pequenas interações de UI que não precisam de um circuito
+// RDSManager — pequenas interações de UI que não precisam de um circuito
 // Blazor (tema, menu mobile e fechamento de dropdowns). Tudo client-side.
 
 function toggleTheme() {
