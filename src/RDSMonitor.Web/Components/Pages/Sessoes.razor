@@ -1,76 +1,516 @@
 @page "/sessoes"
+@rendermode InteractiveServer
 @attribute [Authorize]
+@inject IServerService ServerService
+@inject ICommandService CommandService
+@implements IDisposable
 
 <PageTitle>Sessões · RDSManager</PageTitle>
 
+<ConfirmDialog @ref="confirmacao" />
+
 <div class="dash-header">
-    <h1>Sessões — RDS01</h1>
-    <p>Usuários conectados neste servidor.</p>
+    <h1>Sessões</h1>
+    <p>Usuários conectados nos servidores RDS e os processos de cada um.</p>
 </div>
 
 <div class="toolbar">
-    <div class="toolbar-search">
+    <div class="toolbar-search process-search">
         <i class="fa-solid fa-magnifying-glass"></i>
-        <input type="text" placeholder="Buscar por usuário ou sessão..." disabled title="Disponível quando os dados forem reais" />
+        <input type="text"
+               placeholder="Pesquisar processo, PID ou usuário (ex: chrome, 4532, joao)"
+               aria-label="Pesquisar processo"
+               value="@busca"
+               @oninput="AoDigitarAsync" />
+        @if (BuscaAtiva)
+        {
+            <button class="search-clear" title="Limpar pesquisa" aria-label="Limpar pesquisa" @onclick="LimparBuscaAsync">
+                <i class="fa-solid fa-xmark" style="position:static;transform:none;"></i>
+            </button>
+        }
     </div>
+    <div class="toolbar-search" style="flex:0 1 220px;min-width:180px;">
+        <i class="fa-solid fa-hard-drive"></i>
+        <select @bind="servidorSelecionadoId" @bind:after="AtualizarAsync" class="toolbar-select" aria-label="Filtrar por servidor">
+            <option value="0">Todos os servidores</option>
+            @foreach (var sv in servidores)
+            {
+                <option value="@sv.Id">@(sv.DisplayName ?? sv.Name)</option>
+            }
+        </select>
+    </div>
+    <label class="toolbar-check" title="Processos do Windows (csrss, dwm, svchost...) e de contas de sistema. Não podem ser derrubados.">
+        <input type="checkbox" @bind="mostrarSistema" /> Processos do sistema
+    </label>
     <div class="toolbar-actions">
-        <button class="btn-pill" disabled><i class="fa-solid fa-rotate"></i> Atualizar</button>
-        <button class="btn-pill" disabled><i class="fa-solid fa-filter"></i> Filtros</button>
-        <button class="btn-pill success" disabled><i class="fa-solid fa-file-export"></i> Exportar</button>
+        <button class="btn-pill" @onclick="AtualizarAsync">
+            <i class="fa-solid fa-rotate"></i> Atualizar
+        </button>
     </div>
 </div>
 
-<AuthorizeView Context="authContext">
-    <Authorized>
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th>Usuário</th>
-                    <th>Sessão</th>
-                    <th>Estado</th>
-                    <th>CPU</th>
-                    <th>Memória</th>
-                    <th>Ações</th>
-                </tr>
-            </thead>
-            <tbody>
-                @{ var podeAdministrar = authContext.User.IsInRole("Administrador"); }
-                @foreach (var sessao in sessoes)
-                {
-                    <tr>
-                        <td>@sessao.Usuario</td>
-                        <td class="mono">@sessao.Id</td>
-                        <td><span class="status-dot @sessao.Estado.ToLower()"></span>@sessao.Estado</td>
-                        <td class="mono">@(sessao.Cpu)%</td>
-                        <td class="mono">@(sessao.MemoriaGb) GB</td>
+@if (!string.IsNullOrEmpty(mensagem))
+{
+    <div class="login-alert @(erroMensagem ? "" : "login-alert-success")" role="alert">
+        @mensagem
+    </div>
+}
+
+@{
+    var sessoes = servidores
+        .Where(s => servidorSelecionadoId == 0 || s.Id == servidorSelecionadoId)
+        .SelectMany(s => s.Sessions.OrderBy(x => x.Username).Select(sess => (sv: s, sess)))
+        .ToList();
+
+    // Na pesquisa, só ficam as sessões com algum processo correspondente.
+    if (BuscaAtiva)
+        sessoes = sessoes.Where(x => ProcessosVisiveis(x.sv.Id, x.sess.RdsSessionId).Count > 0).ToList();
+
+    var colunas = podeAdministrar ? 10 : 9;
+}
+
+@if (BuscaAtiva)
+{
+    var totalAchados = sessoes.Sum(x => ProcessosVisiveis(x.sv.Id, x.sess.RdsSessionId).Count);
+    <p class="search-summary" role="status">
+        @if (totalAchados == 0)
+        {
+            <span>Nenhum processo encontrado para <strong>"@busca"</strong>@(mostrarSistema ? "" : " (processos do sistema ocultos)").</span>
+        }
+        else
+        {
+            <span><strong>@totalAchados</strong> processo(s) encontrados para <strong>"@busca"</strong> em <strong>@sessoes.Count</strong> sessão(ões).</span>
+        }
+    </p>
+}
+
+@if (!sessoes.Any())
+{
+    @if (!BuscaAtiva)
+    {
+        <p class="dash-note">
+            Nenhuma sessão ativa no momento.
+            @if (!servidores.Any(s => s.IsOnline))
+            {
+                <span>Instale o agente nos servidores para ver dados em tempo real.</span>
+            }
+        </p>
+    }
+}
+else
+{
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th></th>
+                <th>Servidor</th>
+                <th>Usuário</th>
+                <th>Sessão</th>
+                <th>Estado</th>
+                <th>CPU</th>
+                <th>Memória</th>
+                <th>Login</th>
+                <th>Ociosidade</th>
+                @if (podeAdministrar) { <th>Ações</th> }
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var (sv, sess) in sessoes)
+            {
+                var chave     = (sv.Id, sess.RdsSessionId);
+                var expandida = BuscaAtiva || expandidas.Contains(chave);
+                <tr class="@(expandida ? "row-expanded" : "")">
+                    <td>
+                        @if (!BuscaAtiva)
+                        {
+                            <button class="btn-expand" @onclick="() => AlternarProcessosAsync(sv.Id, sess.RdsSessionId)"
+                                    title="@(expandida ? "Ocultar processos" : "Ver processos")"
+                                    aria-expanded="@(expandida ? "true" : "false")">
+                                <i class="fa-solid @(expandida ? "fa-chevron-down" : "fa-chevron-right")"></i>
+                            </button>
+                        }
+                    </td>
+                    <td class="mono">@sv.Name</td>
+                    <td>
+                        @sess.Username
+                        @if (EhSimulada(sess))
+                        {
+                            <span class="badge-sim" title="Sessão fictícia gerada pelo modo de simulação do agente">simulada</span>
+                        }
+                    </td>
+                    <td class="mono">
+                        @sess.RdsSessionId
+                        @if (sess.SessionName is not null)
+                        {
+                            <span>(@sess.SessionName)</span>
+                        }
+                    </td>
+                    <td>
+                        <span class="status-dot @sess.State.ToString().ToLower()"></span>
+                        @NomeEstado(sess.State)
+                    </td>
+                    <td class="mono">@sess.CpuPercent.ToString("0.#")%</td>
+                    <td class="mono">@FormatarMemoria(sess.MemoryMb)</td>
+                    <td class="mono">@sess.LogonTime.ToLocalTime().ToString("dd/MM HH:mm")</td>
+                    <td class="mono">@(sess.IdleTimeMinutes == 0 ? "—" : FormatarOciosidade(sess.IdleTimeMinutes))</td>
+                    @if (podeAdministrar)
+                    {
                         <td class="acoes">
-                            <button class="btn-acao" disabled="@(!podeAdministrar)" title="@(podeAdministrar ? "Encerrar sessão" : "Apenas administradores")">Logoff</button>
-                            <button class="btn-acao" disabled="@(!podeAdministrar)">Disconnect</button>
-                            <button class="btn-acao" disabled="@(!podeAdministrar)">Matar processo</button>
-                            <button class="btn-acao" disabled="@(!podeAdministrar)">Mensagem</button>
+                            <button class="btn-acao" @onclick="() => DisconnectAsync(sv, sess)"
+                                    disabled="@(sess.State == SessionState.Disconnected)"
+                                    title="@(sess.State == SessionState.Disconnected ? "Sessão já está desconectada" : "Desconectar mantendo os programas abertos")">
+                                Disconnect
+                            </button>
+                            <button class="btn-acao danger" @onclick="() => LogoffAsync(sv, sess)"
+                                    title="Encerrar a sessão (fecha todos os programas do usuário)">
+                                Logoff
+                            </button>
+                        </td>
+                    }
+                </tr>
+
+                @if (expandida)
+                {
+                    var todos    = processos.TryGetValue(chave, out var lista) ? lista : new List<ServerProcess>();
+                    var visiveis = ProcessosVisiveis(sv.Id, sess.RdsSessionId);
+                    var ocultos  = BuscaAtiva ? 0 : todos.Count - visiveis.Count;
+                    <tr class="row-detail">
+                        <td colspan="@colunas">
+                            @if (todos.Count == 0)
+                            {
+                                <p class="dash-note" style="margin:0;">
+                                    Nenhum processo recebido para esta sessão ainda — aguarde o próximo heartbeat do agente.
+                                </p>
+                            }
+                            else
+                            {
+                                <table class="data-table nested">
+                                    <thead>
+                                        <tr>
+                                            <th>Processo</th>
+                                            <th>PID</th>
+                                            <th>Dono</th>
+                                            <th>CPU</th>
+                                            <th>Memória</th>
+                                            @if (podeAdministrar) { <th></th> }
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var proc in visiveis)
+                                        {
+                                            var pendente = killsPendentes.Values.Any(k => k.ServerId == sv.Id && k.Pid == proc.Pid);
+                                            <tr class="@(proc.IsProtected ? "row-protected" : "")">
+                                                <td>
+                                                    @if (proc.IsProtected)
+                                                    {
+                                                        <i class="fa-solid fa-lock" title="Processo do sistema — protegido"></i>
+                                                    }
+                                                    @Realcar(proc.Name)
+                                                </td>
+                                                <td class="mono">@Realcar(proc.Pid.ToString())</td>
+                                                <td>@Realcar(proc.Username ?? "—")</td>
+                                                <td class="mono">@proc.CpuPercent.ToString("0.#")%</td>
+                                                <td class="mono">@FormatarMemoria(proc.MemoryMb)</td>
+                                                @if (podeAdministrar)
+                                                {
+                                                    <td class="acoes">
+                                                        @if (proc.IsProtected)
+                                                        {
+                                                            <span class="sub-label">protegido</span>
+                                                        }
+                                                        else if (pendente)
+                                                        {
+                                                            <span class="sub-label"><i class="fa-solid fa-spinner fa-spin"></i> derrubando…</span>
+                                                        }
+                                                        else
+                                                        {
+                                                            <button class="btn-acao danger" @onclick="() => DerrubarAsync(sv, sess, proc)">
+                                                                <i class="fa-solid fa-skull-crossbones"></i> Derrubar
+                                                            </button>
+                                                        }
+                                                    </td>
+                                                }
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                                <p class="dash-note" style="margin:.5rem 0 0;">
+                                    @visiveis.Count processo(s)
+                                    @if (ocultos > 0)
+                                    {
+                                        <span> · @ocultos processo(s) do sistema ocultos</span>
+                                    }
+                                    · ordenados por CPU.
+                                </p>
+                            }
                         </td>
                     </tr>
                 }
-            </tbody>
-        </table>
-    </Authorized>
-</AuthorizeView>
-
-<p class="dash-note">
-    Ações reais serão habilitadas quando o Agente Windows estiver integrado
-    a este servidor. Por perfil: apenas o Administrador pode executar
-    logoff, disconnect, encerrar processos e reiniciar serviços; Operador e
-    Auditor têm acesso somente de visualização.
-</p>
+            }
+        </tbody>
+    </table>
+}
 
 @code {
-    private record SessaoInfo(string Usuario, string Id, string Estado, int Cpu, double MemoriaGb);
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthState { get; set; } = null!;
 
-    private readonly List<SessaoInfo> sessoes = new()
+    private ConfirmDialog confirmacao = null!;
+
+    private List<Server> servidores = new();
+    private int     servidorSelecionadoId;
+    private bool    mostrarSistema;
+    private bool    podeAdministrar;
+    private string  operador = "portal";
+    private string? mensagem;
+    private bool    erroMensagem;
+
+    // ── Pesquisa ──────────────────────────────────────────────
+    private string busca = string.Empty;
+    private bool   BuscaAtiva => !string.IsNullOrWhiteSpace(busca);
+
+    // Sessões com a lista de processos aberta, e processos carregados por (servidor, sessão).
+    // Durante a pesquisa são carregados os processos de todas as sessões.
+    private readonly HashSet<(int ServerId, int SessionId)> expandidas = new();
+    private Dictionary<(int, int), List<ServerProcess>> processos = new();
+
+    // Comandos KillProcess enfileirados nesta tela, aguardando resultado do agente
+    private readonly Dictionary<int, (int ServerId, int Pid, string Nome)> killsPendentes = new();
+
+    private System.Timers.Timer? _timer;
+
+    protected override async Task OnInitializedAsync()
     {
-        new("joao.silva", "15", "Active", 15, 2.0),
-        new("marcos.souza", "20", "Idle", 40, 4.0),
-        new("carlos.lima", "25", "Active", 10, 1.0),
-        new("ana.pereira", "31", "Disconnected", 2, 0.6),
+        var auth        = await AuthState;
+        podeAdministrar = auth.User.IsInRole("Administrador");
+        operador        = auth.User.Identity?.Name ?? "portal";
+
+        await AtualizarAsync();
+
+        _timer = new System.Timers.Timer(10_000);
+        _timer.Elapsed += async (_, _) => await InvokeAsync(async () =>
+        {
+            await AtualizarAsync();
+            StateHasChanged();
+        });
+        _timer.Start();
+    }
+
+    private async Task AtualizarAsync()
+    {
+        servidores = await ServerService.GetAllWithSessionsAsync();
+
+        // Esquece sessões que encerraram
+        expandidas.RemoveWhere(k => !servidores.Any(s => s.Id == k.ServerId && s.Sessions.Any(x => x.RdsSessionId == k.SessionId)));
+
+        await CarregarProcessosAsync();
+        await VerificarKillsAsync();
+    }
+
+    private async Task CarregarProcessosAsync()
+    {
+        var novos = new Dictionary<(int, int), List<ServerProcess>>();
+
+        if (BuscaAtiva)
+        {
+            // Pesquisa: todos os processos dos servidores visíveis, agrupados por sessão
+            foreach (var sv in servidores.Where(s => servidorSelecionadoId == 0 || s.Id == servidorSelecionadoId))
+                foreach (var g in (await ServerService.GetProcessesAsync(sv.Id)).GroupBy(p => p.RdsSessionId))
+                    novos[(sv.Id, g.Key)] = g.ToList();
+        }
+        else
+        {
+            foreach (var k in expandidas)
+                novos[k] = await ServerService.GetProcessesAsync(k.ServerId, k.SessionId);
+        }
+
+        processos = novos;
+    }
+
+    /// <summary>
+    /// Processos exibidos de uma sessão. Na pesquisa, os que casam com o termo
+    /// (nome, PID ou dono); fora dela, todos — exceto os do sistema, se ocultos.
+    /// </summary>
+    private List<ServerProcess> ProcessosVisiveis(int serverId, int sessionId)
+    {
+        if (!processos.TryGetValue((serverId, sessionId), out var lista)) return new();
+
+        IEnumerable<ServerProcess> q = lista;
+        if (!mostrarSistema) q = q.Where(p => !p.IsProtected);
+
+        if (BuscaAtiva)
+        {
+            var termo = busca.Trim();
+            q = q.Where(p => p.Name.Contains(termo, StringComparison.OrdinalIgnoreCase)
+                          || p.Pid.ToString().StartsWith(termo, StringComparison.Ordinal)
+                          || (p.Username?.Contains(termo, StringComparison.OrdinalIgnoreCase) ?? false));
+        }
+
+        return q.ToList();
+    }
+
+    private async Task AoDigitarAsync(ChangeEventArgs e)
+    {
+        var estavaAtiva = BuscaAtiva;
+        busca = e.Value?.ToString() ?? string.Empty;
+
+        // Ao entrar ou sair do modo pesquisa recarrega do banco; enquanto
+        // digita, o filtro é só em memória (ProcessosVisiveis).
+        if (estavaAtiva != BuscaAtiva)
+            await CarregarProcessosAsync();
+    }
+
+    private async Task LimparBuscaAsync()
+    {
+        busca = string.Empty;
+        await CarregarProcessosAsync();
+    }
+
+    private async Task AlternarProcessosAsync(int serverId, int sessionId)
+    {
+        var k = (serverId, sessionId);
+        if (!expandidas.Remove(k))
+        {
+            expandidas.Add(k);
+            processos[k] = await ServerService.GetProcessesAsync(serverId, sessionId);
+        }
+    }
+
+    /// <summary>Destaca o termo pesquisado dentro do texto.</summary>
+    private RenderFragment Realcar(string texto) => builder =>
+    {
+        var termo = busca.Trim();
+        var i = BuscaAtiva ? texto.IndexOf(termo, StringComparison.OrdinalIgnoreCase) : -1;
+        if (i < 0)
+        {
+            builder.AddContent(0, texto);
+            return;
+        }
+        builder.AddContent(0, texto[..i]);
+        builder.OpenElement(1, "mark");
+        builder.AddAttribute(2, "class", "hl");
+        builder.AddContent(3, texto.Substring(i, termo.Length));
+        builder.CloseElement();
+        builder.AddContent(4, texto[(i + termo.Length)..]);
     };
+
+    // ── Derrubar processo ─────────────────────────────────────
+
+    private async Task DerrubarAsync(Server sv, Session sess, ServerProcess proc)
+    {
+        var ok = await confirmacao.PerguntarAsync(
+            "Derrubar processo?",
+            "O processo será encerrado à força. Qualquer trabalho não salvo nele será perdido.",
+            "Derrubar processo",
+            perigo: true,
+            detalhes: new[]
+            {
+                ("Processo", proc.Name),
+                ("PID",      proc.Pid.ToString()),
+                ("Usuário",  sess.Username),
+                ("Servidor", sv.Name),
+            });
+        if (!ok) return;
+
+        // Nome e sessão vão junto para o agente conferir que o PID ainda é o mesmo processo.
+        var cmd = await CommandService.CreateAsync(sv.Id, CommandType.KillProcess,
+            new Dictionary<string, string>
+            {
+                { "Pid",         proc.Pid.ToString() },
+                { "ProcessName", proc.Name },
+                { "SessionId",   sess.RdsSessionId.ToString() },
+            }, operador);
+
+        killsPendentes[cmd.Id] = (sv.Id, proc.Pid, proc.Name);
+        Avisar($"Comando para derrubar \"{proc.Name}\" (PID {proc.Pid}) enviado a {sv.Name}. O agente executa em alguns segundos.", erro: false);
+    }
+
+    /// <summary>Mostra o resultado dos comandos de derrubar quando o agente responder.</summary>
+    private async Task VerificarKillsAsync()
+    {
+        if (killsPendentes.Count == 0) return;
+
+        foreach (var cmd in await CommandService.GetByIdsAsync(killsPendentes.Keys))
+        {
+            if (cmd.Status is CommandStatus.Pending or CommandStatus.Executing) continue;
+
+            var (_, pid, nome) = killsPendentes[cmd.Id];
+            killsPendentes.Remove(cmd.Id);
+
+            if (cmd.Status == CommandStatus.Completed)
+                Avisar(cmd.Output ?? $"Processo \"{nome}\" (PID {pid}) encerrado.", erro: false);
+            else
+                Avisar($"Não foi possível derrubar \"{nome}\" (PID {pid}): {cmd.Error ?? "erro desconhecido"}", erro: true);
+        }
+    }
+
+    // ── Logoff / Disconnect ───────────────────────────────────
+
+    private async Task LogoffAsync(Server sv, Session sess)
+    {
+        var ok = await confirmacao.PerguntarAsync(
+            "Fazer logoff da sessão?",
+            "A sessão será encerrada e todos os programas abertos pelo usuário serão fechados. Trabalho não salvo será perdido.",
+            "Fazer logoff",
+            perigo: true,
+            detalhes: DetalhesSessao(sv, sess));
+        if (!ok) return;
+
+        await EnfileirarAsync(sv, sess, CommandType.Logoff);
+    }
+
+    private async Task DisconnectAsync(Server sv, Session sess)
+    {
+        var ok = await confirmacao.PerguntarAsync(
+            "Desconectar a sessão?",
+            "O usuário perde a conexão, mas a sessão continua aberta no servidor com os programas em execução. Ele pode reconectar e continuar de onde parou.",
+            "Desconectar",
+            perigo: false,
+            detalhes: DetalhesSessao(sv, sess));
+        if (!ok) return;
+
+        await EnfileirarAsync(sv, sess, CommandType.Disconnect);
+    }
+
+    private static IReadOnlyList<(string, string)> DetalhesSessao(Server sv, Session sess) => new[]
+    {
+        ("Usuário",  sess.Username),
+        ("Sessão",   sess.SessionName is null ? sess.RdsSessionId.ToString() : $"{sess.RdsSessionId} ({sess.SessionName})"),
+        ("Servidor", sv.Name),
+    };
+
+    private async Task EnfileirarAsync(Server sv, Session sess, CommandType tipo)
+    {
+        await CommandService.CreateAsync(sv.Id, tipo,
+            new Dictionary<string, string> { { "SessionId", sess.RdsSessionId.ToString() } }, operador);
+        var acao = tipo == CommandType.Logoff ? "Logoff" : "Disconnect";
+        Avisar($"{acao} de {sess.Username} (sessão {sess.RdsSessionId}) enviado a {sv.Name}. O agente executa no próximo ciclo.", erro: false);
+    }
+
+    // ── Helpers ───────────────────────────────────────────────
+
+    private void Avisar(string texto, bool erro)
+    {
+        mensagem     = texto;
+        erroMensagem = erro;
+    }
+
+    /// <summary>Sessões fictícias do modo de simulação do agente usam o nome "sim#ID".</summary>
+    private static bool EhSimulada(Session s) => s.SessionName?.StartsWith("sim#", StringComparison.OrdinalIgnoreCase) == true;
+
+    private static string NomeEstado(SessionState s) => s switch
+    {
+        SessionState.Active       => "Ativa",
+        SessionState.Disconnected => "Desconectada",
+        SessionState.Idle         => "Ociosa",
+        _                         => s.ToString(),
+    };
+
+    private static string FormatarMemoria(double mb)
+        => mb >= 1024 ? $"{mb / 1024:0.##} GB" : $"{mb:0} MB";
+
+    private static string FormatarOciosidade(int minutos)
+        => minutos >= 60 ? $"{minutos / 60}h {minutos % 60:D2}m" : $"{minutos} min";
+
+    public void Dispose() => _timer?.Dispose();
 }

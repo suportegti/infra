@@ -1,22 +1,62 @@
 @page "/relatorios"
 @attribute [Authorize]
+@inject AppDbContext Db
 
 <PageTitle>Relatórios · RDSManager</PageTitle>
 
 <div class="dash-header">
     <h1>Relatórios</h1>
-    <p>Relatórios previstos no escopo do projeto.</p>
+    <p>Histórico e estatísticas de uso dos servidores.</p>
 </div>
 
-<ul class="report-list">
-    <li>Licenças em uso</li>
-    <li>Usuários simultâneos</li>
-    <li>Horas trabalhadas</li>
-    <li>Tempo médio de conexão</li>
-    <li>Aplicações mais utilizadas</li>
-</ul>
+<h2 style="font-size:1.1rem;margin-bottom:.75rem;">
+    <i class="fa-solid fa-clock-rotate-left"></i> Histórico de sessões (últimas 100)
+</h2>
 
-<p class="dash-note">
-    Em construção — disponível após a implementação do histórico de sessões
-    (tabela SessionHistory).
-</p>
+@if (historico.Count == 0)
+{
+    <p class="dash-note">Nenhum histórico ainda. Os dados aparecerão assim que o agente for instalado.</p>
+}
+else
+{
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Servidor</th>
+                <th>Usuário</th>
+                <th>Login</th>
+                <th>Logoff</th>
+                <th>Duração</th>
+                <th>Encerramento</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var h in historico)
+            {
+                var duracao = h.LogoffTime.HasValue
+                    ? h.LogoffTime.Value - h.LogonTime
+                    : DateTime.UtcNow - h.LogonTime;
+                <tr>
+                    <td class="mono">@h.ServerName</td>
+                    <td>@h.Username</td>
+                    <td class="mono">@h.LogonTime.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</td>
+                    <td class="mono">@(h.LogoffTime.HasValue ? h.LogoffTime.Value.ToLocalTime().ToString("dd/MM/yyyy HH:mm") : "Ativa")</td>
+                    <td class="mono">@($"{(int)duracao.TotalHours}h {duracao.Minutes:D2}m")</td>
+                    <td>@(h.LogoffReason ?? "—") @(h.AdminUsername is not null ? $"({h.AdminUsername})" : "")</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private List<SessionHistory> historico = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        historico = await Db.SessionHistories
+            .OrderByDescending(h => h.LogonTime)
+            .Take(100)
+            .ToListAsync();
+    }
+}

@@ -1,0 +1,111 @@
+@*
+    Janela modal de confirmação do próprio RDSManager (substitui o confirm() do
+    navegador). Uso numa página interativa:
+
+        <ConfirmDialog @ref="confirmacao" />
+        ...
+        if (!await confirmacao.PerguntarAsync("Título", "Mensagem", "Derrubar")) return;
+
+    Esc ou clique fora = Cancelar. O foco abre no botão Cancelar, para que um
+    Enter acidental não confirme uma ação destrutiva.
+*@
+
+@if (visivel)
+{
+    <div class="rds-modal-backdrop" @onclick="Cancelar">
+        <div class="rds-modal @(perigo ? "is-danger" : "")"
+             role="alertdialog" aria-modal="true"
+             aria-labelledby="rds-modal-titulo" aria-describedby="rds-modal-msg"
+             tabindex="-1"
+             @onclick:stopPropagation
+             @onkeydown="TeclaAsync">
+            <div class="rds-modal-header">
+                <span class="rds-modal-icon">
+                    <i class="fa-solid @(perigo ? "fa-triangle-exclamation" : "fa-circle-question")"></i>
+                </span>
+                <h2 id="rds-modal-titulo">@titulo</h2>
+            </div>
+
+            <p id="rds-modal-msg" class="rds-modal-msg">@mensagem</p>
+
+            @if (detalhes.Count > 0)
+            {
+                <dl class="rds-modal-details">
+                    @foreach (var (rotulo, valor) in detalhes)
+                    {
+                        <dt>@rotulo</dt>
+                        <dd>@valor</dd>
+                    }
+                </dl>
+            }
+
+            <div class="rds-modal-actions">
+                <button type="button" class="btn-pill" @ref="botaoCancelar" @onclick="Cancelar">Cancelar</button>
+                <button type="button" class="btn-pill @(perigo ? "danger" : "primary")" @onclick="Confirmar">
+                    @textoConfirmar
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool    visivel;
+    private bool    perigo;
+    private bool    focarAoRenderizar;
+    private string  titulo         = string.Empty;
+    private string  mensagem       = string.Empty;
+    private string  textoConfirmar = "Confirmar";
+    private IReadOnlyList<(string Rotulo, string Valor)> detalhes = Array.Empty<(string, string)>();
+
+    private ElementReference         botaoCancelar;
+    private TaskCompletionSource<bool>? resposta;
+
+    /// <summary>Abre o modal e devolve true se o usuário confirmar.</summary>
+    public Task<bool> PerguntarAsync(
+        string titulo,
+        string mensagem,
+        string textoConfirmar = "Confirmar",
+        bool perigo = true,
+        IReadOnlyList<(string Rotulo, string Valor)>? detalhes = null)
+    {
+        resposta?.TrySetResult(false);   // pergunta anterior ainda aberta = cancelada
+
+        this.titulo         = titulo;
+        this.mensagem       = mensagem;
+        this.textoConfirmar = textoConfirmar;
+        this.perigo         = perigo;
+        this.detalhes       = detalhes ?? Array.Empty<(string, string)>();
+
+        resposta          = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        visivel           = true;
+        focarAoRenderizar = true;
+        StateHasChanged();
+        return resposta.Task;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (visivel && focarAoRenderizar)
+        {
+            focarAoRenderizar = false;
+            try { await botaoCancelar.FocusAsync(); } catch { /* elemento já saiu da tela */ }
+        }
+    }
+
+    private void Confirmar() => Fechar(true);
+    private void Cancelar()  => Fechar(false);
+
+    private void TeclaAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") Cancelar();
+    }
+
+    private void Fechar(bool confirmado)
+    {
+        visivel = false;
+        var r = resposta;
+        resposta = null;
+        r?.TrySetResult(confirmado);
+    }
+}

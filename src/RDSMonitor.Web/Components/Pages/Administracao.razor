@@ -1,25 +1,251 @@
 @page "/administracao"
+@rendermode InteractiveServer
 @attribute [Authorize(Roles = "Administrador")]
+@inject IServerService ServerService
+@inject ICommandService CommandService
+@inject AppDbContext Db
+@implements IDisposable
 
 <PageTitle>Administração · RDSManager</PageTitle>
 
 <div class="dash-header">
     <h1>Administração</h1>
-    <p>Ações disponíveis para o perfil Administrador.</p>
+    <p>Comandos executados e ações disponíveis por servidor.</p>
 </div>
 
-<ul class="report-list">
-    <li>Logoff de sessão</li>
-    <li>Disconnect de sessão</li>
-    <li>Encerrar processo específico do usuário</li>
-    <li>Enviar mensagem para usuário</li>
-    <li>Shadow Session (acompanhar sessão)</li>
-    <li>Encerrar processos travados</li>
-    <li>Reiniciar serviços do servidor</li>
-    <li>Reiniciar servidor</li>
-</ul>
+@* ── Formulário de comando manual ─────────────────────────────────────────── *@
+<section class="form-panel" style="margin-bottom:1.5rem;">
+    <h2 style="font-size:1rem;margin-bottom:1rem;">
+        <i class="fa-solid fa-terminal"></i> Enviar comando manual
+    </h2>
 
-<p class="dash-note">
-    Em construção — cada ação será conectada ao Agente Windows
-    correspondente e registrada na tabela de Auditoria.
-</p>
+    @if (!string.IsNullOrEmpty(feedback))
+    {
+        <div class="login-alert @(feedbackErro ? "" : "login-alert-success")" role="alert">
+            @feedback
+        </div>
+    }
+
+    <div class="form-grid" style="align-items:end;">
+        <label class="field">
+            <i class="fa-solid fa-hard-drive"></i>
+            <select @bind="formServerId">
+                <option value="0">— Selecione o servidor —</option>
+                @foreach (var sv in servidores)
+                {
+                    <option value="@sv.Id">
+                        @(sv.DisplayName ?? sv.Name) @(sv.IsOnline ? "" : "(offline)")
+                    </option>
+                }
+            </select>
+        </label>
+        <label class="field">
+            <i class="fa-solid fa-bolt"></i>
+            <select @bind="formComando">
+                <option value="Logoff">Logoff de sessão</option>
+                <option value="Disconnect">Disconnect de sessão</option>
+                <option value="KillProcess">Encerrar processo (por PID)</option>
+                <option value="SendMessage">Enviar mensagem ao usuário</option>
+                <option value="RestartService">Reiniciar serviço TermService</option>
+                <option value="RestartServer">Reiniciar servidor</option>
+            </select>
+        </label>
+        <label class="field">
+            <i class="fa-solid fa-keyboard"></i>
+            <input @bind="formParam" placeholder="@PlaceholderParam" title="@TitleParam" />
+        </label>
+        <button class="btn-pill primary"
+                disabled="@(formServerId == 0)"
+                @onclick="EnviarComandoAsync">
+            <i class="fa-solid fa-paper-plane"></i> Enviar
+        </button>
+    </div>
+</section>
+
+@* ── Histórico de comandos ────────────────────────────────────────────────── *@
+<h2 style="font-size:1.1rem;margin-bottom:.75rem;">
+    <i class="fa-solid fa-list-check"></i> Últimos 50 comandos
+</h2>
+
+@if (comandos.Count == 0)
+{
+    <p class="dash-note">Nenhum comando foi enviado ainda. Use o formulário acima para começar.</p>
+}
+else
+{
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Servidor</th>
+                <th>Tipo</th>
+                <th>Parâmetros</th>
+                <th>Status</th>
+                <th>Operador</th>
+                <th>Criado em</th>
+                <th>Executado em</th>
+                <th>Resultado</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var cmd in comandos)
+            {
+                <tr>
+                    <td class="mono">@cmd.Id</td>
+                    <td class="mono">@cmd.Server?.Name</td>
+                    <td class="mono">@cmd.Type</td>
+                    <td class="mono"
+                        style="font-size:.8rem;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                        title="@cmd.ParametersJson">
+                        @cmd.ParametersJson
+                    </td>
+                    <td>
+                        <span class="status-dot @StatusCss(cmd.Status)"></span>
+                        @cmd.Status
+                    </td>
+                    <td>@(cmd.CreatedByUsername ?? "—")</td>
+                    <td class="mono">@cmd.CreatedAt.ToLocalTime().ToString("dd/MM HH:mm:ss")</td>
+                    <td class="mono">
+                        @(cmd.ExecutedAt.HasValue
+                            ? cmd.ExecutedAt.Value.ToLocalTime().ToString("dd/MM HH:mm:ss")
+                            : "—")
+                    </td>
+                    <td style="font-size:.8rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                        title="@(cmd.Output ?? cmd.Error)">
+                        @if (cmd.Status == CommandStatus.Completed)
+                        {
+                            <span style="color:var(--green)">@(cmd.Output ?? "OK")</span>
+                        }
+                        else if (cmd.Status == CommandStatus.Failed)
+                        {
+                            <span style="color:var(--danger)">@(cmd.Error ?? "Falha")</span>
+                        }
+                        else
+                        {
+                            <span style="color:var(--text-muted)">aguardando agente…</span>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthState { get; set; } = null!;
+
+    private List<Server>  servidores = new();
+    private List<Command> comandos   = new();
+
+    private int    formServerId;
+    private string formComando = "Logoff";
+    private string formParam   = string.Empty;
+    private string? feedback;
+    private bool    feedbackErro;
+
+    private System.Timers.Timer? _timer;
+
+    // ── Textos de ajuda dinâmicos para o campo de parâmetro ──────────────────
+
+    private string PlaceholderParam => formComando switch
+    {
+        "Logoff"         => "ID da sessão (ex: 15)",
+        "Disconnect"     => "ID da sessão (ex: 15)",
+        "KillProcess"    => "PID do processo (ex: 4532)",
+        "SendMessage"    => "15|Salve seus arquivos agora",
+        "RestartService" => "Nome do serviço (padrão: TermService)",
+        "RestartServer"  => "Delay em segundos (padrão: 10)",
+        _                => "Parâmetro"
+    };
+
+    private string TitleParam => formComando == "SendMessage"
+        ? "Use o formato: ID_SESSÃO|Texto da mensagem"
+        : PlaceholderParam;
+
+    // ── Ciclo de vida ─────────────────────────────────────────────────────────
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CarregarAsync();
+        _timer = new System.Timers.Timer(15_000);
+        _timer.Elapsed += async (_, _) => await InvokeAsync(async () =>
+        {
+            await CarregarAsync();
+            StateHasChanged();
+        });
+        _timer.Start();
+    }
+
+    private async Task CarregarAsync()
+    {
+        servidores = await ServerService.GetAllWithSessionsAsync();
+        comandos   = await Db.Commands
+            .AsNoTracking()
+            .Include(c => c.Server)
+            .OrderByDescending(c => c.CreatedAt)
+            .Take(50)
+            .ToListAsync();
+    }
+
+    // ── Envio de comando ──────────────────────────────────────────────────────
+
+    private async Task EnviarComandoAsync()
+    {
+        if (formServerId == 0) return;
+
+        var tipo       = Enum.TryParse<CommandType>(formComando, out var t) ? t : CommandType.Logoff;
+        var parametros = MontarParametros(tipo, formParam.Trim());
+
+        var auth     = await AuthState;
+        var operador = auth.User.Identity?.Name ?? "portal";
+
+        await CommandService.CreateAsync(formServerId, tipo, parametros, operador);
+
+        feedback     = $"Comando \"{formComando}\" enfileirado com sucesso.";
+        feedbackErro = false;
+        formParam    = string.Empty;
+
+        await CarregarAsync();
+        StateHasChanged();
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private static Dictionary<string, string> MontarParametros(CommandType tipo, string param)
+    {
+        // Usa new Dictionary<string, string> explícito para evitar
+        // ambiguidade de inferência de tipo em expressões switch no Razor.
+        return tipo switch
+        {
+            CommandType.Logoff     => new Dictionary<string, string> { { "SessionId", param } },
+            CommandType.Disconnect => new Dictionary<string, string> { { "SessionId", param } },
+            CommandType.KillProcess => new Dictionary<string, string> { { "Pid", param } },
+            CommandType.SendMessage => param.Contains('|')
+                ? new Dictionary<string, string>
+                    {
+                        { "SessionId", param.Split('|')[0].Trim() },
+                        { "Message",   param.Split('|', 2)[1].Trim() }
+                    }
+                : new Dictionary<string, string> { { "SessionId", param } },
+            CommandType.RestartService =>
+                new Dictionary<string, string>
+                    { { "ServiceName", string.IsNullOrWhiteSpace(param) ? "TermService" : param } },
+            CommandType.RestartServer =>
+                new Dictionary<string, string>
+                    { { "DelaySeconds", string.IsNullOrWhiteSpace(param) ? "10" : param } },
+            _ => new Dictionary<string, string>()
+        };
+    }
+
+    private static string StatusCss(CommandStatus s) => s switch
+    {
+        CommandStatus.Pending   => "idle",
+        CommandStatus.Executing => "idle",
+        CommandStatus.Completed => "active",
+        CommandStatus.Failed    => "disconnected",
+        _                       => ""
+    };
+
+    public void Dispose() => _timer?.Dispose();
+}

@@ -1,4 +1,4 @@
-# RDS Monitor — v1 (telas de acesso)
+# RDSManager — v1 (telas de acesso)
 
 Primeira etapa do projeto descrito no escopo: um portal web central para
 monitorar e administrar sessões nos servidores RDS, no lugar de scripts ou
@@ -28,16 +28,19 @@ src/RDSMonitor.Web/
 │   ├── Routes.razor           # roteador + proteção por autorização
 │   ├── Layout/                # menu lateral (por perfil) e shell da página
 │   └── Pages/
-│       ├── Login.razor        # tela de login
-│       ├── Home.razor         # dashboard (rota "/")
-│       ├── Sessoes.razor      # tela de sessões (mock, com ações por perfil)
-│       ├── Servidores.razor   # inventário de servidores
-│       ├── Relatorios.razor   # placeholder dos relatórios do escopo
-│       ├── Administracao.razor# placeholder das ações administrativas
-│       └── Usuarios.razor     # perfis de acesso
+│       ├── Login.razor         # tela de login
+│       ├── AlterarSenha.razor  # troca de senha (login ou já logado)
+│       ├── Home.razor          # dashboard (rota "/")
+│       ├── Sessoes.razor       # tela de sessões (mock, com ações por perfil)
+│       ├── Servidores.razor    # inventário de servidores
+│       ├── Relatorios.razor    # placeholder dos relatórios do escopo
+│       ├── Administracao.razor # placeholder das ações administrativas
+│       ├── Usuarios.razor      # administração de usuários (incluir/editar/desabilitar)
+│       ├── UsuariosEditar.razor# formulário de edição de um usuário
+│       └── PerfisUsuarios.razor# referência: permissões de cada perfil
 ├── Data/                      # DbContext (EF Core) e seed inicial
 ├── Models/                    # AppUser, UserProfile
-├── Services/                  # validação de credenciais (IUserService)
+├── Services/                  # validação de credenciais e administração de usuários (IUserService)
 └── wwwroot/css/site.css       # tokens de design (cores, tipografia)
 ```
 
@@ -65,6 +68,20 @@ execução, já com um usuário de cada perfil.
 Troque ou remova esses usuários antes de qualquer uso fora do ambiente de
 desenvolvimento.
 
+## Esqueci a senha do admin — como resetar
+
+Sem apagar o banco nem os outros usuários, rode (dentro de `src/RDSMonitor.Web`):
+
+```bash
+dotnet run -- --reset-senha-admin
+```
+
+Isso redefine a senha do usuário `admin` para `Rds@1234` e garante que a
+conta esteja habilitada, e encerra sem subir o servidor web. Se quiser
+escolher a senha nova, use `--reset-senha-admin=SuaSenhaNova` (mínimo 8
+caracteres). Depois é só rodar `dotnet run` normalmente e entrar com a nova
+senha.
+
 ## Novidades desta revisão (visual)
 
 - **Login centralizado**: card único centralizado sobre o fundo, no lugar do
@@ -82,12 +99,38 @@ desenvolvimento.
 - **Barra de ações (toolbar)**: campo de busca + botões de ação coloridos
   acima das tabelas de Sessões e Servidores (ainda decorativos, aguardando os
   dados reais).
+- **Alterar senha**: tela `/alterar-senha`, acessível pelo link na tela de
+  login e pelo menu do usuário (já logado). Pede usuário + senha atual +
+  nova senha (troca autosserviço — ainda não há recuperação por e-mail, pois
+  isso depende da integração com AD/Entra ID prevista para uma próxima
+  etapa).
+
+## Administração de usuários (novo)
+
+A tela **Usuários do sistema** (`/usuarios`, só para Administrador) deixou
+de ser só uma referência estática e agora administra de verdade os usuários
+do painel:
+
+- **Incluir**: formulário retrátil "Novo usuário" (login, nome de exibição,
+  perfil e senha inicial).
+- **Editar**: tela própria (`/usuarios/editar/{id}`) para alterar nome de
+  exibição, perfil e, opcionalmente, redefinir a senha do usuário (útil se
+  ele esquecer e não tiver mais acesso).
+- **Desabilitar/Habilitar**: um clique alterna o campo `Ativo` do usuário —
+  usuário desabilitado não consegue mais fazer login (a validação já
+  filtra por `Ativo` em `ValidarCredenciaisAsync`). Não existe exclusão
+  definitiva por enquanto, só desabilitar, para preservar o histórico.
+
+A tabela de permissões que antes ficava nessa tela virou uma página própria,
+só de referência: **Perfis de usuários** (`/perfis-usuarios`), com a mesma
+lista de permissões por perfil (Administrador, Operador, Auditor).
 
 ## O que cada perfil vê
 
-- **Administrador**: todas as telas, incluindo Administração e Usuários do
-  sistema; é o único que veria os botões de ação (Logoff, Disconnect,
-  Matar processo, Mensagem) habilitados na tela de Sessões.
+- **Administrador**: todas as telas, incluindo Administração, Usuários do
+  sistema (incluir/editar/desabilitar) e Perfis de usuários; é o único que
+  veria os botões de ação (Logoff, Disconnect, Matar processo, Mensagem)
+  habilitados na tela de Sessões.
 - **Operador**: Dashboard, Sessões, Servidores e Relatórios — somente
   visualização.
 - **Auditor**: Dashboard, Sessões e Relatórios — somente consulta.

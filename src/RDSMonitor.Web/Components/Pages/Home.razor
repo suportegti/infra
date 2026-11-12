@@ -1,5 +1,8 @@
 @page "/"
+@rendermode InteractiveServer
 @attribute [Authorize]
+@inject IServerService ServerService
+@implements IDisposable
 
 <PageTitle>Dashboard · RDSManager</PageTitle>
 
@@ -13,7 +16,7 @@
         <div class="summary-icon icon-blue"><i class="fa-solid fa-hard-drive"></i></div>
         <div class="summary-body">
             <span class="summary-title">Servidores online</span>
-            <span class="summary-value">@totalServidores</span>
+            <span class="summary-value">@servidores.Count(s => s.IsOnline)</span>
             <a class="summary-link" href="servidores">Ver todos <i class="fa-solid fa-arrow-right"></i></a>
         </div>
     </div>
@@ -21,7 +24,7 @@
         <div class="summary-icon icon-green"><i class="fa-solid fa-desktop"></i></div>
         <div class="summary-body">
             <span class="summary-title">Sessões ativas</span>
-            <span class="summary-value">@totalSessoes</span>
+            <span class="summary-value">@servidores.Sum(s => s.Sessions.Count)</span>
             <a class="summary-link" href="sessoes">Ver todas <i class="fa-solid fa-arrow-right"></i></a>
         </div>
     </div>
@@ -29,7 +32,7 @@
         <div class="summary-icon icon-amber"><i class="fa-solid fa-triangle-exclamation"></i></div>
         <div class="summary-body">
             <span class="summary-title">Servidores em alerta</span>
-            <span class="summary-value">@servidores.Count(s => s.Alerta)</span>
+            <span class="summary-value">@servidores.Count(s => s.IsOnline && s.CpuPercent > 80)</span>
             <a class="summary-link" href="servidores">Ver todos <i class="fa-solid fa-arrow-right"></i></a>
         </div>
     </div>
@@ -53,34 +56,56 @@
 <section class="server-grid">
     @foreach (var servidor in servidores)
     {
-        <a class="server-card @(servidor.Alerta ? "is-alert" : "")" href="sessoes">
+        var isAlerta = servidor.IsOnline && servidor.CpuPercent > 80;
+        <a class="server-card @(isAlerta ? "is-alert" : "")" href="sessoes">
             <div class="server-card-top">
-                <span class="status-dot @(servidor.Alerta ? "idle" : "active")"></span>
-                <span class="server-name">@servidor.Nome</span>
+                <span class="status-dot @(servidor.IsOnline ? (isAlerta ? "idle" : "active") : "disconnected")"></span>
+                <span class="server-name">@(servidor.DisplayName ?? servidor.Name)</span>
             </div>
-            <span class="server-count">@servidor.Sessoes</span>
-            <span class="server-label">usuários conectados</span>
+            @if (servidor.IsOnline)
+            {
+                <span class="server-count">@servidor.Sessions.Count</span>
+                <span class="server-label">usuários conectados</span>
+                <span class="server-label" style="font-size:.75rem;margin-top:.25rem;">
+                    CPU @servidor.CpuPercent.ToString("0.#")% · RAM @servidor.MemoryUsedGb.ToString("0.##") GB
+                </span>
+            }
+            else
+            {
+                <span class="server-count" style="font-size:1rem;color:var(--text-muted)">Offline</span>
+                <span class="server-label">aguardando agente</span>
+            }
         </a>
     }
 </section>
 
-<p class="dash-note">
-    Dados de demonstração — serão substituídos pela coleta em tempo real
-    assim que o Agente Windows for instalado nos servidores RDS.
-</p>
+@if (!servidores.Any(s => s.IsOnline))
+{
+    <p class="dash-note">
+        Nenhum agente conectado ainda. Instale o <strong>RDSMonitor.Agent</strong> em cada servidor
+        RDS e ele começará a enviar dados automaticamente.
+    </p>
+}
 
 @code {
-    private record ServidorResumo(string Nome, int Sessoes, bool Alerta);
+    private List<Server> servidores = new();
+    private System.Timers.Timer? _timer;
 
-    private readonly List<ServidorResumo> servidores = new()
+    protected override async Task OnInitializedAsync()
     {
-        new("RDS01", 24, false),
-        new("RDS02", 18, false),
-        new("RDS03", 13, false),
-        new("RDS04", 11, true),
-        new("RDS05", 22, false),
-    };
+        await CarregarAsync();
 
-    private int totalServidores => servidores.Count;
-    private int totalSessoes => servidores.Sum(s => s.Sessoes);
+        _timer = new System.Timers.Timer(30_000);
+        _timer.Elapsed += async (_, _) => await InvokeAsync(async () =>
+        {
+            await CarregarAsync();
+            StateHasChanged();
+        });
+        _timer.Start();
+    }
+
+    private async Task CarregarAsync()
+        => servidores = await ServerService.GetAllWithSessionsAsync();
+
+    public void Dispose() => _timer?.Dispose();
 }

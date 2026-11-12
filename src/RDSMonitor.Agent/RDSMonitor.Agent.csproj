@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>RDSMonitor.Agent</RootNamespace>
+    <!-- Necessário para instalar como Windows Service via sc.exe -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <AssemblyName>RDSMonitor.Agent</AssemblyName>
+    <Description>RDSManager - Agente de monitoramento de sessões RDS</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Windows Service host -->
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.1" />
+    <!-- WMI: Win32_Process, Win32_LogonSession, etc. -->
+    <PackageReference Include="System.Management" Version="8.0.0" />
+  </ItemGroup>
+
+</Project>

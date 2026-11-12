@@ -1,65 +1,317 @@
 @page "/servidores"
+@rendermode InteractiveServer
 @attribute [Authorize(Roles = "Administrador,Operador")]
+@inject IServerService ServerService
+@inject ICommandService CommandService
+@implements IDisposable
 
 <PageTitle>Servidores · RDSManager</PageTitle>
 
+<ConfirmDialog @ref="confirmacao" />
+
 <div class="dash-header">
     <h1>Servidores</h1>
-    <p>Inventário dos servidores RDS monitorados.</p>
+    <p>Cadastro e estado dos servidores RDS monitorados.</p>
 </div>
 
-<div class="toolbar">
-    <div class="toolbar-search">
-        <i class="fa-solid fa-magnifying-glass"></i>
-        <input type="text" placeholder="Buscar servidor..." disabled title="Disponível quando os dados forem reais" />
-    </div>
-    <div class="toolbar-actions">
-        <button class="btn-pill" disabled><i class="fa-solid fa-rotate"></i> Atualizar</button>
-        <AuthorizeView Roles="Administrador">
-            <Authorized>
-                <button class="btn-pill primary" disabled><i class="fa-solid fa-plus"></i> Novo</button>
-            </Authorized>
-        </AuthorizeView>
-    </div>
-</div>
+@if (!string.IsNullOrEmpty(mensagem))
+{
+    <div class="login-alert @(mensagemErro ? "" : "login-alert-success")" role="alert">@mensagem</div>
+}
+
+<AuthorizeView Roles="Administrador">
+    <Authorized>
+        <details class="form-card" open="@novoAberto">
+            <summary @onclick="() => novoAberto = !novoAberto" @onclick:preventDefault>
+                <span><i class="fa-solid fa-plus"></i> Novo servidor</span>
+                <i class="fa-solid fa-chevron-down chevron"></i>
+            </summary>
+            <div class="form-body">
+                <div class="form-grid">
+                    <label class="field">
+                        <i class="fa-solid fa-hard-drive"></i>
+                        <input @bind="novoNome" placeholder="Nome do servidor (ex: RDS06)" maxlength="100" />
+                    </label>
+                    <label class="field">
+                        <i class="fa-solid fa-tag"></i>
+                        <input @bind="novoDisplay" placeholder="Nome amigável (opcional)" maxlength="150" />
+                    </label>
+                </div>
+                <div class="form-actions">
+                    <button class="btn-pill primary" @onclick="CriarAsync" disabled="@string.IsNullOrWhiteSpace(novoNome)">
+                        <i class="fa-solid fa-check"></i> Cadastrar
+                    </button>
+                </div>
+                <p class="dash-note" style="margin-top:.75rem;">
+                    O nome deve ser igual ao <code>AgentSettings:ServerName</code> configurado no agente
+                    daquele servidor. Agentes de servidores não cadastrados ou desabilitados são recusados.
+                </p>
+            </div>
+        </details>
+    </Authorized>
+</AuthorizeView>
 
 <table class="data-table">
     <thead>
         <tr>
             <th>Servidor</th>
-            <th>Sessões ativas</th>
             <th>Estado</th>
+            <th>Sessões</th>
+            <th>CPU</th>
+            <th>RAM usada / total</th>
+            <th>Último heartbeat</th>
+            @if (ehAdmin) { <th>Ações</th> }
         </tr>
     </thead>
     <tbody>
-        @foreach (var servidor in servidores)
+        @foreach (var sv in servidores)
         {
-            <tr>
-                <td class="mono">@servidor.Nome</td>
-                <td class="mono">@servidor.Sessoes</td>
-                <td>
-                    <span class="status-dot @(servidor.Alerta ? "idle" : "active")"></span>
-                    @(servidor.Alerta ? "Atenção" : "Normal")
+            var emEdicao = editandoId == sv.Id;
+            <tr class="@(sv.IsEnabled ? "" : "row-disabled")">
+                <td class="mono">
+                    @if (emEdicao)
+                    {
+                        <div class="inline-edit">
+                            <input @bind="editNome" maxlength="100" aria-label="Nome do servidor" />
+                            <input @bind="editDisplay" maxlength="150" placeholder="Nome amigável" aria-label="Nome amigável" />
+                        </div>
+                    }
+                    else
+                    {
+                        <strong>@sv.Name</strong>
+                        @if (sv.DisplayName is not null)
+                        {
+                            <span class="sub-label">@sv.DisplayName</span>
+                        }
+                    }
                 </td>
+                <td>
+                    @if (!sv.IsEnabled)
+                    {
+                        <span class="status-dot disconnected"></span><span>Desabilitado</span>
+                    }
+                    else if (sv.IsOnline)
+                    {
+                        <span class="status-dot @(sv.CpuPercent > 80 ? "idle" : "active")"></span>
+                        @(sv.CpuPercent > 80 ? "Atenção" : "Online")
+                    }
+                    else
+                    {
+                        <span class="status-dot disconnected"></span><span>Offline</span>
+                    }
+                </td>
+                <td class="mono">@sv.Sessions.Count</td>
+                <td class="mono">@(sv.IsOnline ? $"{sv.CpuPercent:0.#}%" : "—")</td>
+                <td class="mono">
+                    @if (sv.IsOnline)
+                    {
+                        @($"{sv.MemoryUsedGb:0.##} / {sv.MemoryTotalGb:0.##} GB")
+                    }
+                    else { <span>—</span> }
+                </td>
+                <td class="mono">
+                    @(sv.LastHeartbeat.HasValue
+                        ? sv.LastHeartbeat.Value.ToLocalTime().ToString("dd/MM HH:mm:ss")
+                        : "Nunca")
+                </td>
+                @if (ehAdmin)
+                {
+                    <td class="acoes">
+                        @if (emEdicao)
+                        {
+                            <button class="btn-acao" @onclick="() => SalvarEdicaoAsync(sv.Id)">Salvar</button>
+                            <button class="btn-acao" @onclick="CancelarEdicao">Cancelar</button>
+                        }
+                        else
+                        {
+                            <button class="btn-acao" @onclick="() => IniciarEdicao(sv)">Editar</button>
+                            <button class="btn-acao" @onclick="() => AlternarHabilitadoAsync(sv)">
+                                @(sv.IsEnabled ? "Desabilitar" : "Habilitar")
+                            </button>
+                            <button class="btn-acao danger" @onclick="() => ExcluirAsync(sv)">Excluir</button>
+                            <button class="btn-acao"
+                                    disabled="@(!sv.IsOnline)"
+                                    title="@(!sv.IsOnline ? "Servidor offline" : "Reiniciar o serviço de sessão (TermService)")"
+                                    @onclick="() => ReiniciarServicoAsync(sv)">
+                                Reiniciar serviço
+                            </button>
+                            <button class="btn-acao danger"
+                                    disabled="@(!sv.IsOnline)"
+                                    title="@(!sv.IsOnline ? "Servidor offline" : "Reiniciar o servidor")"
+                                    @onclick="() => ReiniciarServidorAsync(sv)">
+                                Reiniciar servidor
+                            </button>
+                        }
+                    </td>
+                }
             </tr>
         }
     </tbody>
 </table>
 
-<p class="dash-note">
-    Ações de administração do servidor (reiniciar serviço, reiniciar
-    servidor) serão adicionadas na tela de Administração.
-</p>
+@if (servidores.Count == 0)
+{
+    <p class="dash-note">Nenhum servidor cadastrado.</p>
+}
 
 @code {
-    private record ServidorInfo(string Nome, int Sessoes, bool Alerta);
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthState { get; set; } = null!;
 
-    private readonly List<ServidorInfo> servidores = new()
+    private ConfirmDialog confirmacao = null!;
+
+    private List<Server> servidores = new();
+    private string? mensagem;
+    private bool    mensagemErro;
+    private bool    ehAdmin;
+    private string  operador = "portal";
+
+    private bool    novoAberto;
+    private string  novoNome    = string.Empty;
+    private string? novoDisplay;
+
+    private int?    editandoId;
+    private string  editNome    = string.Empty;
+    private string? editDisplay;
+
+    private System.Timers.Timer? _timer;
+
+    protected override async Task OnInitializedAsync()
     {
-        new("RDS01", 24, false),
-        new("RDS02", 18, false),
-        new("RDS03", 13, false),
-        new("RDS04", 11, true),
-        new("RDS05", 22, false),
+        var auth = await AuthState;
+        ehAdmin  = auth.User.IsInRole("Administrador");
+        operador = auth.User.Identity?.Name ?? "portal";
+
+        await CarregarAsync();
+
+        _timer = new System.Timers.Timer(30_000);
+        _timer.Elapsed += async (_, _) => await InvokeAsync(async () =>
+        {
+            // Não recarrega durante a edição para não perder o que está sendo digitado
+            if (editandoId is not null) return;
+            await CarregarAsync();
+            StateHasChanged();
+        });
+        _timer.Start();
+    }
+
+    private async Task CarregarAsync()
+        => servidores = await ServerService.GetAllWithSessionsAsync(incluirDesabilitados: true);
+
+    // ── Cadastro ─────────────────────────────────────────────
+
+    private async Task CriarAsync()
+    {
+        var nome = novoNome.Trim();
+        var r = await ServerService.CreateAsync(nome, novoDisplay);
+        if (r == ServerOperationResult.Sucesso)
+        {
+            novoNome = string.Empty;
+            novoDisplay = null;
+            novoAberto = false;
+        }
+        Avisar(r, $"Servidor {nome} cadastrado. Instale o agente nele com ServerName = \"{nome}\".");
+        await CarregarAsync();
+    }
+
+    private void IniciarEdicao(Server sv)
+    {
+        editandoId  = sv.Id;
+        editNome    = sv.Name;
+        editDisplay = sv.DisplayName;
+    }
+
+    private void CancelarEdicao() => editandoId = null;
+
+    private async Task SalvarEdicaoAsync(int id)
+    {
+        var r = await ServerService.UpdateAsync(id, editNome, editDisplay);
+        if (r == ServerOperationResult.Sucesso) editandoId = null;
+        Avisar(r, $"Servidor {editNome.Trim()} atualizado. Se o nome mudou, ajuste também o ServerName no agente.");
+        await CarregarAsync();
+    }
+
+    private async Task AlternarHabilitadoAsync(Server sv)
+    {
+        if (sv.IsEnabled &&
+            !await confirmacao.PerguntarAsync(
+                "Desabilitar servidor?",
+                "O agente deste servidor passará a ser recusado e ele sai das telas de monitoramento. As sessões e processos registrados dele são limpos. Você pode habilitar de novo a qualquer momento.",
+                "Desabilitar",
+                perigo: true,
+                detalhes: DetalhesServidor(sv)))
+            return;
+
+        var r = await ServerService.SetEnabledAsync(sv.Id, !sv.IsEnabled);
+        Avisar(r, sv.IsEnabled ? $"Servidor {sv.Name} desabilitado." : $"Servidor {sv.Name} habilitado.");
+        await CarregarAsync();
+    }
+
+    private async Task ExcluirAsync(Server sv)
+    {
+        if (!await confirmacao.PerguntarAsync(
+                "Excluir servidor definitivamente?",
+                "Sessões, processos e comandos deste servidor serão apagados (o histórico de sessões é mantido). Esta ação não pode ser desfeita.\nPara só pausar o monitoramento, use Desabilitar.",
+                "Excluir servidor",
+                perigo: true,
+                detalhes: DetalhesServidor(sv)))
+            return;
+
+        var r = await ServerService.DeleteAsync(sv.Id);
+        Avisar(r, $"Servidor {sv.Name} excluído.");
+        await CarregarAsync();
+    }
+
+    // ── Comandos ─────────────────────────────────────────────
+
+    private async Task ReiniciarServicoAsync(Server sv)
+    {
+        if (!await confirmacao.PerguntarAsync(
+                "Reiniciar o serviço de sessões?",
+                "O serviço TermService será reiniciado. As sessões conectadas podem cair.",
+                "Reiniciar serviço",
+                perigo: true,
+                detalhes: DetalhesServidor(sv)))
+            return;
+
+        await CommandService.CreateAsync(sv.Id, CommandType.RestartService,
+            new Dictionary<string, string> { { "ServiceName", "TermService" } }, operador);
+        Avisar(ServerOperationResult.Sucesso, $"Comando de reinício de serviço enfileirado para {sv.Name}.");
+    }
+
+    private async Task ReiniciarServidorAsync(Server sv)
+    {
+        if (!await confirmacao.PerguntarAsync(
+                "Reiniciar o servidor?",
+                $"O servidor será reiniciado em 10 segundos. Todos os {sv.Sessions.Count} usuário(s) conectados perderão a sessão e o trabalho não salvo.",
+                "Reiniciar servidor",
+                perigo: true,
+                detalhes: DetalhesServidor(sv)))
+            return;
+
+        await CommandService.CreateAsync(sv.Id, CommandType.RestartServer,
+            new Dictionary<string, string> { { "DelaySeconds", "10" } }, operador);
+        Avisar(ServerOperationResult.Sucesso, $"Comando de reinício enfileirado para {sv.Name}. O servidor será reiniciado em 10 segundos.");
+    }
+
+    private static IReadOnlyList<(string, string)> DetalhesServidor(Server sv) => new[]
+    {
+        ("Servidor", sv.DisplayName is null ? sv.Name : $"{sv.Name} ({sv.DisplayName})"),
+        ("Sessões",  sv.Sessions.Count.ToString()),
     };
+
+    private void Avisar(ServerOperationResult r, string sucesso)
+    {
+        mensagemErro = r != ServerOperationResult.Sucesso;
+        mensagem = r switch
+        {
+            ServerOperationResult.Sucesso       => sucesso,
+            ServerOperationResult.NomeInvalido  => "Nome inválido. Use letras, números, ponto, hífen ou sublinhado (até 100 caracteres).",
+            ServerOperationResult.NomeJaExiste  => "Já existe um servidor com esse nome.",
+            ServerOperationResult.NaoEncontrado => "Servidor não encontrado (pode ter sido excluído).",
+            _                                   => "Não foi possível concluir a operação.",
+        };
+    }
+
+    public void Dispose() => _timer?.Dispose();
 }

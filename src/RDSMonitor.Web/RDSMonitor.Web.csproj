@@ -9,11 +9,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- EF Core + SQLite (V1). Para migrar ao SQL Server, adicionar
+         Microsoft.EntityFrameworkCore.SqlServer e ajustar Program.cs. -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.10" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.10">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+    <!-- PasswordHasher<T> já está incluído no Microsoft.NET.Sdk.Web — sem pacote extra necessário -->
   </ItemGroup>
 
 </Project>
