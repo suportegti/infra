@@ -26,6 +26,9 @@ public class SimulatedSessionStore
 
     private readonly List<SimSession> _sessoes = new();
     private readonly List<(string Usuario, DateTime Em)> _relogins = new();
+    private readonly List<SessionEventInfo> _eventos = new();
+    private long _proximoEvento = -1;            // RecordId negativo = evento simulado
+    private DateTime _proximaQueda;
     private int _proximaSessao = 901;
     private int _proximoPid    = 9_000_000;
 
@@ -39,6 +42,7 @@ public class SimulatedSessionStore
 
         var usuarios = _cfg.Usuarios.Count > 0 ? _cfg.Usuarios : new List<string> { "ana.teste", "bruno.teste", "carla.teste" };
         foreach (var u in usuarios) _sessoes.Add(NovaSessao(u, DateTime.UtcNow.AddMinutes(-_rnd.Next(10, 240))));
+        AgendarQueda();
 
         _log.LogWarning("MODO DE SIMULAÇÃO ATIVO: {Qtd} sessão(ões) fictícia(s) ({Usuarios}). " +
                         "Logoff/Disconnect/reinício em sessões reais estão bloqueados.",
@@ -52,6 +56,7 @@ public class SimulatedSessionStore
         lock (_lock)
         {
             ProcessarRelogins();
+            ProcessarQuedasEReconexoes();
             var agora = DateTime.UtcNow;
             return _sessoes.Select(s => new SessionInfo
             {
@@ -61,8 +66,21 @@ public class SimulatedSessionStore
                 State           = s.DesconectadaEm is null ? "Active" : "Disconnected",
                 LogonTime       = s.LogonUtc,
                 IdleTimeMinutes = s.DesconectadaEm is { } d ? (int)(agora - d).TotalMinutes : 0,
+                ClientName      = s.DesconectadaEm is null ? s.Estacao : null,
+                ClientIp        = s.DesconectadaEm is null ? s.Ip : null,
             }).ToList();
         }
+    }
+
+    /// <summary>Desconexões/reconexões simuladas ainda não confirmadas pelo portal.</summary>
+    public List<SessionEventInfo> GetEvents()
+    {
+        lock (_lock) return _eventos.ToList();
+    }
+
+    public void ConfirmarEventos(IReadOnlyCollection<SessionEventInfo> enviados)
+    {
+        lock (_lock) _eventos.RemoveAll(e => enviados.Any(x => x.RecordId == e.RecordId));
     }
 
     public List<ProcessInfo> GetProcesses()
@@ -100,7 +118,7 @@ public class SimulatedSessionStore
             if (s is null) return Erro($"Sessão simulada {sessionId} não existe mais.");
             if (s.DesconectadaEm is not null) return Erro($"A sessão {sessionId} de {s.Usuario} já está desconectada.");
 
-            s.DesconectadaEm = DateTime.UtcNow;
+            Desconectar(s, motivo: 1);   // 1 = desconectada por ferramenta administrativa
             _log.LogInformation("[SIMULAÇÃO] tsdiscon {Id} — {Usuario} desconectado.", sessionId, s.Usuario);
             return Ok($"Sessão {sessionId} de {s.Usuario} desconectada (tsdiscon {sessionId}). Os programas continuam abertos.");
         }
@@ -157,6 +175,58 @@ public class SimulatedSessionStore
 
     // ── Internos ──────────────────────────────────────────────
 
+    private void Desconectar(SimSession s, int motivo)
+    {
+        var agora = DateTime.UtcNow;
+        s.DesconectadaEm = agora;
+        s.ReconectarEm   = agora.AddSeconds(Math.Max(10, _cfg.ReconectarAposSegundos));
+        Evento(s, 24, "Disconnect", agora, motivo);
+    }
+
+    /// <summary>
+    /// Reconecta as sessões desconectadas após <see cref="SimulationSettings.ReconectarAposSegundos"/>
+    /// e, se configurado, derruba a conexão de um usuário ao acaso (queda de rede, motivo 0).
+    /// </summary>
+    private void ProcessarQuedasEReconexoes()
+    {
+        var agora = DateTime.UtcNow;
+        foreach (var s in _sessoes.Where(s => s.DesconectadaEm is not null && s.ReconectarEm <= agora))
+        {
+            s.DesconectadaEm = null;
+            s.ReconectarEm   = null;
+            Evento(s, 25, "Reconnect", agora, null);
+            _log.LogInformation("[SIMULAÇÃO] {Usuario} reconectou na sessão {Id}.", s.Usuario, s.Id);
+        }
+
+        if (_cfg.QuedaDeRedeACadaMinutos > 0 && agora >= _proximaQueda)
+        {
+            var conectadas = _sessoes.Where(s => s.DesconectadaEm is null).ToList();
+            if (conectadas.Count > 0)
+            {
+                var s = conectadas[_rnd.Next(conectadas.Count)];
+                Desconectar(s, motivo: 0);   // 0 = sem informação adicional (típico de queda de rede)
+                _log.LogInformation("[SIMULAÇÃO] Queda de rede: {Usuario} (sessão {Id}) desconectado.", s.Usuario, s.Id);
+            }
+            AgendarQueda();
+        }
+    }
+
+    private void AgendarQueda()
+        => _proximaQueda = DateTime.UtcNow.AddMinutes(Math.Max(0.5, _cfg.QuedaDeRedeACadaMinutos));
+
+    private void Evento(SimSession s, int eventId, string tipo, DateTime quando, int? motivo)
+        => _eventos.Add(new SessionEventInfo
+        {
+            RecordId   = _proximoEvento--,
+            EventId    = eventId,
+            Type       = tipo,
+            SessionId  = s.Id,
+            Username   = s.Usuario,
+            ClientIp   = s.Ip,
+            TimeUtc    = quando,
+            ReasonCode = motivo,
+        });
+
     private void ProcessarRelogins()
     {
         var agora = DateTime.UtcNow;
@@ -171,7 +241,14 @@ public class SimulatedSessionStore
 
     private SimSession NovaSessao(string usuario, DateTime logonUtc)
     {
-        var s = new SimSession { Id = _proximaSessao++, Usuario = usuario, LogonUtc = logonUtc };
+        var s = new SimSession
+        {
+            Id       = _proximaSessao++,
+            Usuario  = usuario,
+            LogonUtc = logonUtc,
+            Estacao  = "NB-" + usuario.Split('.')[0].ToUpperInvariant(),
+            Ip       = $"10.0.{_rnd.Next(1, 20)}.{_rnd.Next(10, 250)}",
+        };
 
         // Processos de sistema da sessão (protegidos) + programas do usuário
         s.Processos.Add(Proc("csrss",       2,   0.1, protegido: true));
@@ -202,6 +279,9 @@ public class SimulatedSessionStore
         public string    Usuario = string.Empty;
         public DateTime  LogonUtc;
         public DateTime? DesconectadaEm;
+        public DateTime? ReconectarEm;
+        public string    Estacao = string.Empty;
+        public string    Ip      = string.Empty;
         public List<SimProcess> Processos { get; } = new();
     }
 

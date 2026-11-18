@@ -15,6 +15,7 @@ public class AppDbContext : DbContext
     public DbSet<Server>         Servers         => Set<Server>();
     public DbSet<Session>        Sessions        => Set<Session>();
     public DbSet<SessionHistory> SessionHistories => Set<SessionHistory>();
+    public DbSet<SessionEvent>   SessionEvents   => Set<SessionEvent>();
     public DbSet<Command>        Commands        => Set<Command>();
     public DbSet<ServerProcess>  Processes       => Set<ServerProcess>();
 
@@ -80,6 +81,7 @@ public class AppDbContext : DbContext
         {
             e.HasIndex(s => s.Name).IsUnique();
             e.Property(s => s.Name).IsRequired().HasMaxLength(100);
+            e.Property(s => s.Cliente).HasMaxLength(100);
         });
 
         // ── Session ──────────────────────────────────────────
@@ -87,6 +89,8 @@ public class AppDbContext : DbContext
         {
             // Um servidor não pode ter dois registros com o mesmo ID de sessão RDS
             e.HasIndex(s => new { s.ServerId, s.RdsSessionId }).IsUnique();
+            e.Property(s => s.ClientName).HasMaxLength(100);
+            e.Property(s => s.ClientIp).HasMaxLength(64);
             e.HasOne(s => s.Server)
              .WithMany(sv => sv.Sessions)
              .HasForeignKey(s => s.ServerId)
@@ -121,6 +125,27 @@ public class AppDbContext : DbContext
         {
             e.Property(h => h.ServerName).IsRequired().HasMaxLength(100);
             e.Property(h => h.Username).IsRequired().HasMaxLength(150);
+            e.Property(h => h.Cliente).HasMaxLength(100);
+            e.Property(h => h.ClientName).HasMaxLength(100);
+            e.Property(h => h.ClientIp).HasMaxLength(64);
+            e.HasIndex(h => h.LogonTime);
+        });
+
+        // ── SessionEvent ─────────────────────────────────────
+        modelBuilder.Entity<SessionEvent>(e =>
+        {
+            e.ToTable("SessionEvents");
+            // O agente reenvia eventos se o heartbeat falhar: a chave evita duplicados
+            e.HasIndex(x => new { x.ServerName, x.RecordId, x.DataHora }).IsUnique();
+            e.HasIndex(x => x.DataHora);
+            e.Property(x => x.ServerName).IsRequired().HasMaxLength(100);
+            e.Property(x => x.Username).IsRequired().HasMaxLength(150);
+            e.Property(x => x.ClientIp).HasMaxLength(64);
+            e.Ignore(x => x.Motivo);
+            e.HasOne(x => x.SessionHistory)
+             .WithMany(h => h.Eventos)
+             .HasForeignKey(x => x.SessionHistoryId)
+             .OnDelete(DeleteBehavior.SetNull);
         });
     }
 }

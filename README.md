@@ -64,7 +64,7 @@ Para instalar o portal e os agentes em Windows Server, veja
 [docs/IMPLANTACAO.md](docs/IMPLANTACAO.md). Em resumo:
 
 ```powershell
-.\deploy\build-pacotes.ps1 -Versao 1.4.0     # gera dist\RDSMonitor.Web-*.zip e dist\RDSMonitor.Agent-*.zip
+.\deploy\build-pacotes.ps1 -Versao 1.5.0     # gera dist\RDSMonitor.Web-*.zip e dist\RDSMonitor.Agent-*.zip
 # no servidor do portal:      .\install-web.ps1 -SenhaAdmin "..."
 # em cada servidor RDS:       .\install-agent.ps1 -ServidorWeb <ip-ou-dns> -ApiKey "..."
 ```
@@ -76,8 +76,17 @@ Para instalar o portal e os agentes em Windows Server, veja
 | `admin` | `Rds@1234` | Administrador |
 
 Operador e Auditor são **perfis**, não usuários: crie os usuários nominais em
-**Usuários do sistema** e escolha o perfil de cada um. Troque a senha do
-`admin` antes de qualquer uso fora do ambiente de desenvolvimento.
+**Usuários do sistema** e escolha o perfil de cada um. Num banco novo, o portal
+**exige** que o `admin` defina uma senha própria no primeiro login.
+
+### Troca de senha no primeiro login
+
+Usuários criados em **Usuários do sistema** vêm com **"Exigir troca de senha no
+primeiro login"** marcado: a pessoa entra com a senha inicial e é levada à tela
+**Defina sua senha** antes de acessar o portal (a nova senha precisa ser
+diferente da atual). Na edição do usuário a mesma opção força a troca no próximo
+login, útil ao redefinir a senha de alguém. Usuários com troca pendente aparecem
+com o selo *Troca de senha pendente*.
 
 ## Esqueci a senha do admin — como resetar
 
@@ -87,8 +96,9 @@ Sem apagar o banco nem os outros usuários, rode (dentro de `src/RDSMonitor.Web`
 dotnet run -- --reset-senha-admin
 ```
 
-Isso redefine a senha do usuário `admin` para `Rds@1234` e garante que a
-conta esteja habilitada, e encerra sem subir o servidor web. Se quiser
+Isso redefine a senha do usuário `admin` para `Rds@1234` (exigindo a troca no
+próximo login, porque essa senha é pública) e garante que a conta esteja
+habilitada, e encerra sem subir o servidor web. Se quiser
 escolher a senha nova, use `--reset-senha-admin=SuaSenhaNova` (mínimo 8
 caracteres). Depois é só rodar `dotnet run` normalmente e entrar com a nova
 senha.
@@ -164,10 +174,49 @@ Todas as tentativas (sucesso e falha, com usuário e IP) ficam em
 
 A tela **Relatórios** mostra o histórico de sessões filtrado por período (data e
 hora de início e fim, com atalhos: última hora, hoje, ontem, 7 e 30 dias),
-servidor, usuário e situação. Entram as sessões que estiveram abertas em algum
-momento do período. O resumo traz total de sessões, usuários distintos, pico de
-sessões simultâneas e tempo total/médio, e o botão **Exportar Excel** gera um
-.xlsx com os mesmos filtros.
+cliente, servidor, usuário/máquina/IP e situação (inclusive *Com desconexões*).
+Entram as sessões que estiveram abertas em algum momento do período. O resumo
+traz total de sessões, usuários distintos, pico simultâneo, tempo total/médio,
+desconexões, conexões perdidas e tempo desconectado. **Exportar sessões** e
+**Exportar desconexões** geram .xlsx com os mesmos filtros.
+
+### Desconexões e reconexões (1.5.0)
+
+O agente lê do log do Windows *TerminalServices-LocalSessionManager/Operational*
+os eventos **24** (sessão desconectada) e **25** (reconexão), e o **40** para o
+motivo. Cada sessão do relatório tem uma linha do tempo (seta à esquerda) com o
+horário, o motivo e quanto tempo ficou fora. Motivos mais comuns:
+
+| Código (evento 40) | Exibido como |
+|---|---|
+| 0 | Conexão perdida (rede ou cliente fechado) |
+| 1 | Desconectada por ferramenta administrativa (ex.: Disconnect pelo portal) |
+| 3 | Tempo ocioso excedido |
+| 5 | Substituída por outra conexão |
+| 11 | Usuário desconectou |
+| 12 | Usuário fez logoff |
+
+O Windows registra "0" tanto para queda de rede quanto para o cliente RDP
+fechado no X. Se o heartbeat falhar, o agente reenvia os eventos no ciclo
+seguinte e o portal descarta duplicados.
+
+## Sessões
+
+Filtros por **servidor**, **cliente** e **estado** (ativas / desconectadas), e a
+coluna **Origem** com a máquina e o IP de onde o usuário conectou (sessões
+desconectadas mantêm a última origem conhecida). A pesquisa procura por usuário,
+máquina, IP ou servidor; a lista de processos só abre sozinha com **Mostrar
+processos** marcado (aí a pesquisa também procura em processo e PID). Sem a
+flag, clique na seta da sessão encontrada para ver os processos dela. No
+Dashboard, clicar num servidor abre Sessões já filtrada por ele.
+
+## Usuários conectados e histórico de acessos
+
+**Usuários do sistema** mostra quem está conectado ao portal agora (tela aberta
+ou atividade nos últimos 5 minutos) e, em **Acessos**, o histórico completo de
+cada usuário: logins, senhas erradas, bloqueios, saídas e trocas de senha, com o
+IP. Todos os horários do portal e das exportações seguem o **horário de
+Brasília**, independentemente do fuso configurado no servidor.
 
 ## O que ainda é mock nesta versão
 

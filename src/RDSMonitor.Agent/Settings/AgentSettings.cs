@@ -60,4 +60,10 @@ public class SimulationSettings
 
     /// <summary>Segundos até o usuário fictício "fazer login de novo" depois de um logoff. Padrão: 90.</summary>
     public int RelogarAposSegundos { get; set; } = 90;
+
+    /// <summary>Segundos até uma sessão fictícia desconectada reconectar (gera os eventos 24 e 25). Padrão: 60.</summary>
+    public int ReconectarAposSegundos { get; set; } = 60;
+
+    /// <summary>A cada N minutos derruba a conexão de um usuário fictício ao acaso (queda de rede). 0 = desligado.</summary>
+    public double QuedaDeRedeACadaMinutos { get; set; }
 }

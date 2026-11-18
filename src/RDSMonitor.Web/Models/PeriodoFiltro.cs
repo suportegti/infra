@@ -40,7 +40,7 @@ public sealed class PeriodoFiltro
     /// <summary>Preenche o período a partir de um atalho (1h, hoje, ontem, 7d, 30d, tudo).</summary>
     public void Aplicar(string rapido)
     {
-        var agora = DateTime.Now;
+        var agora = RDSMonitor.Web.Services.Horario.Agora;
         var hoje  = agora.Date;
         Rapido = rapido;
         AteData = AteHora = null;
@@ -88,7 +88,7 @@ public sealed class PeriodoFiltro
         {
             var hora = Hora(AteHora);
             var data = Data(AteData)
-                       ?? (hora is null ? null : Data(DeData) ?? DateTime.Today);
+                       ?? (hora is null ? null : Data(DeData) ?? RDSMonitor.Web.Services.Horario.Hoje);
             if (data is null) return null;
 
             return hora is { } t

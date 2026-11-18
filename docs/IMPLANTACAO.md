@@ -57,20 +57,20 @@ o IP do servidor do portal antes de instalar os agentes.
 Na raiz do repositório:
 
 ```powershell
-.\deploy\build-pacotes.ps1 -Versao 1.4.0
+.\deploy\build-pacotes.ps1 -Versao 1.5.0
 ```
 
 Resultado em `dist\`:
 
 | Pacote | Conteúdo |
 |---|---|
-| `RDSMonitor.Web-1.4.0.zip` | `app\`, `install-web.ps1`, `uninstall-web.ps1`, este guia |
-| `RDSMonitor.Agent-1.4.0.zip` | `app\`, `install-agent.ps1`, `uninstall-agent.ps1`, este guia |
+| `RDSMonitor.Web-1.5.0.zip` | `app\`, `install-web.ps1`, `uninstall-web.ps1`, este guia |
+| `RDSMonitor.Agent-1.5.0.zip` | `app\`, `install-agent.ps1`, `uninstall-agent.ps1`, este guia |
 
 Copie cada `.zip` para o servidor de destino (compartilhamento, RDP, etc.).
 
 > **Antes de extrair**, desbloqueie o arquivo, senão o Windows marca os scripts como
-> baixados da internet: `Unblock-File .\RDSMonitor.Web-1.4.0.zip`
+> baixados da internet: `Unblock-File .\RDSMonitor.Web-1.5.0.zip`
 
 ---
 
@@ -79,8 +79,8 @@ Copie cada `.zip` para o servidor de destino (compartilhamento, RDP, etc.).
 No servidor escolhido para o portal, **PowerShell como Administrador**:
 
 ```powershell
-Unblock-File .\RDSMonitor.Web-1.4.0.zip
-Expand-Archive .\RDSMonitor.Web-1.4.0.zip -DestinationPath C:\Temp\RDSMonitor.Web
+Unblock-File .\RDSMonitor.Web-1.5.0.zip
+Expand-Archive .\RDSMonitor.Web-1.5.0.zip -DestinationPath C:\Temp\RDSMonitor.Web
 cd C:\Temp\RDSMonitor.Web
 powershell -ExecutionPolicy Bypass -File .\install-web.ps1 -SenhaAdmin "Defina#UmaSenha1"
 ```
@@ -121,10 +121,12 @@ existem apenas no ambiente de desenvolvimento.
 ## 4. Cadastrar os servidores RDS no portal
 
 1. Acesse `http://<portal>:5000` e entre como `admin`.
-2. Troque a senha, caso não tenha usado `-SenhaAdmin`.
+2. Se não usou `-SenhaAdmin`, o portal pede para definir uma senha própria no
+   primeiro login.
 3. Em **Servidores > Novo servidor**, cadastre cada servidor RDS com o **nome**
    exatamente igual ao que o agente vai usar. O padrão é o nome do computador
    (`hostname`), por exemplo `RDS-TESTE01`. Maiúsculas e minúsculas não importam.
+   Preencha o **Cliente** para poder filtrar Sessões e Relatórios por ele.
 4. Ajuste os perfis em **Perfis de usuários** (opcional) e crie os usuários dos
    operadores em **Usuários do sistema**.
 
@@ -189,8 +191,8 @@ O registro fica guardado mesmo que o servidor seja excluído depois.
 **PowerShell como Administrador** no servidor RDS:
 
 ```powershell
-Unblock-File .\RDSMonitor.Agent-1.4.0.zip
-Expand-Archive .\RDSMonitor.Agent-1.4.0.zip -DestinationPath C:\Temp\RDSMonitor.Agent
+Unblock-File .\RDSMonitor.Agent-1.5.0.zip
+Expand-Archive .\RDSMonitor.Agent-1.5.0.zip -DestinationPath C:\Temp\RDSMonitor.Agent
 cd C:\Temp\RDSMonitor.Agent
 powershell -ExecutionPolicy Bypass -File .\install-agent.ps1 -ServidorWeb 10.0.0.20 -ApiKey "<chave mostrada pelo portal>"
 ```
@@ -239,8 +241,8 @@ O serviço `RDSMonitor.Agent` fica com:
 ## 6. Roteiro de validação
 
 1. **Dashboard**: o servidor aparece **online**, com CPU e memória, em até 30 s.
-2. **Sessões**: as sessões do servidor aparecem com usuário, estado e horário de
-   logon no **horário local**.
+2. **Sessões**: as sessões do servidor aparecem com usuário, origem (máquina e IP),
+   estado e horário de logon no **horário de Brasília**.
 3. Crie **um usuário de teste** e conecte-o via RDP. Na sessão dele, abra o Bloco de
    Notas. Depois, no portal:
 
@@ -253,6 +255,8 @@ O serviço `RDSMonitor.Agent` fica com:
    | **Desconectar** | a sessão fica *Desconectada*; o RDP do usuário cai, mas os programas continuam |
    | **Logoff** | a sessão some; o histórico em Relatórios é fechado |
    | Usuário que **fechou o RDP sem sair** | aparece como *Desconectada* no portal |
+   | **Relatórios** > seta da sessão de teste | linha do tempo com a desconexão (motivo "ferramenta administrativa" ou "conexão perdida") e a reconexão |
+   | Filtro **Desconectadas** em Sessões | só as sessões desconectadas aparecem |
    | **Auditoria** | todas as ações acima aparecem com o seu usuário e o resultado |
 
 4. **Nunca** teste Logoff ou Desconectar na **sua própria** sessão de administração
@@ -275,6 +279,9 @@ troca os arquivos e o religa.
   execução, sem apagar dados; os usuários existentes recebem o perfil equivalente.
 - **Agente**: informe de novo `-ServidorWeb` e `-ApiKey`, porque a configuração é
   regravada.
+- **Portal e agente de versões diferentes** funcionam juntos: um agente 1.4 com o
+  portal 1.5 só não envia origem (máquina/IP) nem desconexões; atualize os agentes
+  para ter esses dados.
 
 ## 8. Desinstalar
 
@@ -364,8 +371,11 @@ Num PowerShell **como administrador**, no servidor RDS (não precisa parar o ser
 & "C:\RDSMonitor\Agent\RDSMonitor.Agent.exe" --diagnostico-sessoes
 ```
 
-Mostra três blocos: o que a API do Windows (WTS) enxerga, o que o agente envia ao
-portal (com a contagem de desconectadas) e a saída do `quser` para comparação. Se a
+Mostra quatro blocos: o que a API do Windows (WTS) enxerga (com a máquina e o IP
+de origem), o que o agente envia ao portal (com a contagem de desconectadas), as
+desconexões (24) e reconexões (25) das últimas 24 h no log do Windows e a saída
+do `quser` para comparação. Se o bloco 3 disser "sem permissão", o agente não
+está rodando como LocalSystem/administrador e não enviará desconexões. Se a
 sessão aparece como `Disconnected` no bloco 2, ela vai aparecer como *Desconectada*
 na tela Sessões no próximo heartbeat (até 15 s).
 

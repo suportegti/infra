@@ -11,6 +11,12 @@ public enum AcessoResultado
     Bloqueado,
     /// <summary>Recusado pelo limite de requisições por IP (rate limit).</summary>
     LimiteDeTaxa,
+    /// <summary>Usuário saiu do portal (botão Sair).</summary>
+    Logout,
+    /// <summary>Senha correta, mas a troca é obrigatória antes de entrar.</summary>
+    TrocaDeSenhaExigida,
+    /// <summary>Senha alterada pelo próprio usuário.</summary>
+    SenhaAlterada,
 }
 
 /// <summary>
@@ -36,4 +42,26 @@ public class AcessoLog
 
     /// <summary>Texto curto de contexto (ex.: minutos de bloqueio).</summary>
     public string? Detalhe { get; set; }
+
+    public static string Descrever(AcessoResultado r) => r switch
+    {
+        AcessoResultado.Sucesso             => "Entrou",
+        AcessoResultado.SenhaIncorreta      => "Senha incorreta",
+        AcessoResultado.UsuarioDesconhecido => "Usuário inexistente",
+        AcessoResultado.UsuarioDesabilitado => "Usuário desabilitado",
+        AcessoResultado.Bloqueado           => "Bloqueado",
+        AcessoResultado.LimiteDeTaxa        => "Limite por IP",
+        AcessoResultado.Logout              => "Saiu",
+        AcessoResultado.TrocaDeSenhaExigida => "Troca de senha exigida",
+        AcessoResultado.SenhaAlterada       => "Senha alterada",
+        _                                   => r.ToString(),
+    };
+
+    /// <summary>Classe do indicador colorido (status-dot) na tela.</summary>
+    public static string Css(AcessoResultado r) => r switch
+    {
+        AcessoResultado.Sucesso or AcessoResultado.SenhaAlterada => "active",
+        AcessoResultado.Logout or AcessoResultado.TrocaDeSenhaExigida => "idle",
+        _ => "disconnected",
+    };
 }

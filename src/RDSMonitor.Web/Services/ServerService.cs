@@ -43,8 +43,11 @@ public interface IServerService
     Task<List<ServerProcess>> GetProcessesAsync(int serverId, int? rdsSessionId = null);
 
     // ── Cadastro ─────────────────────────────────────────────
-    Task<ServerOperationResult> CreateAsync(string name, string? displayName);
-    Task<ServerOperationResult> UpdateAsync(int id, string name, string? displayName);
+    Task<ServerOperationResult> CreateAsync(string name, string? displayName, string? cliente = null);
+    Task<ServerOperationResult> UpdateAsync(int id, string name, string? displayName, string? cliente = null);
+
+    /// <summary>Clientes distintos cadastrados nos servidores (para filtros).</summary>
+    Task<List<string>> GetClientesAsync();
     Task<ServerOperationResult> SetEnabledAsync(int id, bool enabled);
 
     /// <summary>Exclui o servidor com suas sessões, processos e comandos (o histórico de sessões é mantido).</summary>
@@ -107,7 +110,17 @@ public class ServerService : IServerService
 
     // ── Cadastro ─────────────────────────────────────────────
 
-    public async Task<ServerOperationResult> CreateAsync(string name, string? displayName)
+    public async Task<List<string>> GetClientesAsync()
+    {
+        var lista = await _db.Servers.AsNoTracking()
+            .Where(s => s.Cliente != null && s.Cliente != "")
+            .Select(s => s.Cliente!)
+            .Distinct()
+            .ToListAsync();
+        return lista.OrderBy(c => c, StringComparer.CurrentCultureIgnoreCase).ToList();
+    }
+
+    public async Task<ServerOperationResult> CreateAsync(string name, string? displayName, string? cliente = null)
     {
         name = name?.Trim() ?? string.Empty;
         if (!NomeValido.IsMatch(name)) return ServerOperationResult.NomeInvalido;
@@ -118,6 +131,7 @@ public class ServerService : IServerService
         {
             Name        = name,
             DisplayName = Limpar(displayName),
+            Cliente     = Limpar(cliente),
             IsEnabled   = true,
         });
         await _db.SaveChangesAsync();
@@ -125,7 +139,7 @@ public class ServerService : IServerService
         return ServerOperationResult.Sucesso;
     }
 
-    public async Task<ServerOperationResult> UpdateAsync(int id, string name, string? displayName)
+    public async Task<ServerOperationResult> UpdateAsync(int id, string name, string? displayName, string? cliente = null)
     {
         var server = await _db.Servers.FindAsync(id);
         if (server is null) return ServerOperationResult.NaoEncontrado;
@@ -136,7 +150,13 @@ public class ServerService : IServerService
 
         server.Name        = name;
         server.DisplayName = Limpar(displayName);
+        server.Cliente     = Limpar(cliente);
         await _db.SaveChangesAsync();
+
+        // Sessões ainda abertas passam a contar para o novo cliente; as encerradas mantêm o de antes
+        await _db.SessionHistories
+            .Where(h => h.ServerName == server.Name && h.LogoffTime == null)
+            .ExecuteUpdateAsync(u => u.SetProperty(h => h.Cliente, server.Cliente));
         _db.Entry(server).State = EntityState.Detached;   // contexto longo do circuito
         return ServerOperationResult.Sucesso;
     }
@@ -206,6 +226,16 @@ public class ServerService : IServerService
         foreach (var sessionDto in dto.Sessions)
             sessionDto.LogonTime = ParaUtc(sessionDto.LogonTime);
 
+        // Registros de histórico ainda abertos deste servidor (um por sessão viva)
+        var abertos = await _db.SessionHistories
+            .Where(h => h.ServerName == server.Name && h.LogoffTime == null)
+            .ToListAsync();
+
+        SessionHistory? AbertoDe(int rdsSessionId, string username) => abertos
+            .Where(h => h.RdsSessionId == rdsSessionId && h.Username == username && h.LogoffTime == null)
+            .OrderByDescending(h => h.Id)
+            .FirstOrDefault();
+
         // ── Sessões que sumiram → fechar histórico e remover ─
         var reportedIds = dto.Sessions.Select(s => s.SessionId).ToHashSet();
         var removed     = server.Sessions.Where(s => !reportedIds.Contains(s.RdsSessionId)).ToList();
@@ -215,14 +245,7 @@ public class ServerService : IServerService
             // Fecha o registro de histórico aberto quando a sessão apareceu.
             // Só cria um novo (já fechado) se não houver registro aberto —
             // ex.: sessão que existia antes de o histórico ser implantado.
-            var aberto = await _db.SessionHistories
-                .Where(h => h.ServerName   == server.Name
-                         && h.RdsSessionId == s.RdsSessionId
-                         && h.Username     == s.Username
-                         && h.LogoffTime   == null)
-                .OrderByDescending(h => h.Id)
-                .FirstOrDefaultAsync();
-
+            var aberto = AbertoDe(s.RdsSessionId, s.Username);
             if (aberto is null)
             {
                 aberto = new SessionHistory
@@ -231,6 +254,9 @@ public class ServerService : IServerService
                     RdsSessionId = s.RdsSessionId,
                     Username     = s.Username,
                     LogonTime    = s.LogonTime,
+                    Cliente      = server.Cliente,
+                    ClientName   = s.ClientName,
+                    ClientIp     = s.ClientIp,
                 };
                 _db.SessionHistories.Add(aberto);
             }
@@ -245,25 +271,66 @@ public class ServerService : IServerService
         foreach (var sessionDto in dto.Sessions)
         {
             var existing = server.Sessions.FirstOrDefault(s => s.RdsSessionId == sessionDto.SessionId);
+            var nomeCliente = Opcional(sessionDto.ClientName, 100);
+            var ipCliente   = Opcional(sessionDto.ClientIp, 64);
 
-            if (existing is null)
+            // O Windows reaproveita IDs de sessão: se outro login ocupou o mesmo ID
+            // entre dois heartbeats (outro usuário ou outro horário de logon), a
+            // sessão anterior terminou — fecha o histórico dela e abre um novo.
+            var anterior = existing is null ? null : AbertoDe(existing.RdsSessionId, existing.Username);
+            var reaproveitada = existing is not null
+                && (!string.Equals(existing.Username, sessionDto.Username, StringComparison.OrdinalIgnoreCase)
+                    || (anterior is not null && Math.Abs((anterior.LogonTime - sessionDto.LogonTime).TotalMinutes) > 2));
+            if (reaproveitada)
             {
-                existing = new Session
+                if (anterior is not null)
                 {
-                    ServerId     = server.Id,
-                    RdsSessionId = sessionDto.SessionId,
-                    LogonTime    = sessionDto.LogonTime,
-                };
-                _db.Sessions.Add(existing);
+                    // A sessão anterior terminou antes do novo logon (melhor estimativa disponível)
+                    anterior.LogoffTime   = sessionDto.LogonTime > anterior.LogonTime && sessionDto.LogonTime < agora
+                        ? sessionDto.LogonTime
+                        : agora;
+                    anterior.LogoffReason = "Agente";
+                }
+                existing!.ClientName = null;
+                existing.ClientIp    = null;
+            }
+
+            if (existing is null || reaproveitada)
+            {
+                if (existing is null)
+                {
+                    existing = new Session
+                    {
+                        ServerId     = server.Id,
+                        RdsSessionId = sessionDto.SessionId,
+                        LogonTime    = sessionDto.LogonTime,
+                    };
+                    _db.Sessions.Add(existing);
+                }
 
                 // Inicia o registro de histórico (LogoffTime preenchido depois)
-                _db.SessionHistories.Add(new SessionHistory
+                var novo = new SessionHistory
                 {
                     ServerName   = server.Name,
                     RdsSessionId = sessionDto.SessionId,
                     Username     = sessionDto.Username,
                     LogonTime    = sessionDto.LogonTime,
-                });
+                    Cliente      = server.Cliente,
+                    ClientName   = nomeCliente,
+                    ClientIp     = ipCliente,
+                };
+                _db.SessionHistories.Add(novo);
+                abertos.Add(novo);
+            }
+            else if (nomeCliente is not null || ipCliente is not null)
+            {
+                // Reconectou (talvez de outra máquina): o histórico guarda a última origem
+                var aberto = AbertoDe(sessionDto.SessionId, sessionDto.Username);
+                if (aberto is not null)
+                {
+                    aberto.ClientName = nomeCliente ?? aberto.ClientName;
+                    aberto.ClientIp   = ipCliente   ?? aberto.ClientIp;
+                }
             }
 
             existing.Username        = sessionDto.Username;
@@ -274,7 +341,15 @@ public class ServerService : IServerService
             existing.CpuPercent      = Math.Round(sessionDto.CpuPercent, 1);
             existing.MemoryMb        = Math.Round(sessionDto.MemoryMb, 1);
             existing.LastSeen        = agora;
+
+            // Sessão desconectada não informa origem: mantém a última conhecida
+            if (nomeCliente is not null) existing.ClientName = nomeCliente;
+            if (ipCliente   is not null) existing.ClientIp   = ipCliente;
         }
+
+        // ── Desconexões e reconexões (eventos 24/25 do Windows) ─
+        if (dto.Events.Count > 0)
+            await GravarEventosAsync(server, dto.Events, abertos);
 
         // ── Processos: substitui a "foto" anterior do servidor ─
         await _db.Processes.Where(p => p.ServerId == server.Id).ExecuteDeleteAsync();
@@ -304,6 +379,80 @@ public class ServerService : IServerService
     }
 
     private static string Truncar(string texto, int max) => texto.Length <= max ? texto : texto[..max];
+
+    /// <summary>Texto opcional: vazio vira null; o resto é aparado e truncado.</summary>
+    private static string? Opcional(string? texto, int max)
+        => string.IsNullOrWhiteSpace(texto) ? null : Truncar(texto.Trim(), max);
+
+    /// <summary>Limite de segurança de eventos aceitos por heartbeat.</summary>
+    private const int MaxEventos = 1_000;
+
+    /// <summary>
+    /// Grava as desconexões/reconexões enviadas pelo agente, ignorando as já
+    /// recebidas (o agente reenvia quando um heartbeat falha), e liga cada uma
+    /// à sessão do histórico em que aconteceu.
+    /// </summary>
+    private async Task GravarEventosAsync(Server server, List<SessionEventDto> eventos, List<SessionHistory> abertos)
+    {
+        var lote = eventos.Take(MaxEventos)
+            .Select(e => (Dto: e, Quando: DateTime.SpecifyKind(ParaUtc(e.TimeUtc), DateTimeKind.Unspecified)))
+            .ToList();
+
+        var ids = lote.Select(e => e.Dto.RecordId).Distinct().ToList();
+        var jaGravados = (await _db.SessionEvents.AsNoTracking()
+                .Where(e => e.ServerName == server.Name && ids.Contains(e.RecordId))
+                .Select(e => new { e.RecordId, e.DataHora })
+                .ToListAsync())
+            .Select(e => (e.RecordId, e.DataHora))
+            .ToHashSet();
+
+        var novos = 0;
+        foreach (var (e, quando) in lote)
+        {
+            if (!jaGravados.Add((e.RecordId, quando))) continue;   // duplicado (inclusive dentro do lote)
+
+            var tipo = e.Type.Equals("Reconnect", StringComparison.OrdinalIgnoreCase) || e.EventId == 25
+                ? SessionEventType.Reconexao
+                : SessionEventType.Desconexao;
+            var usuario = Opcional(e.Username, 150) ?? string.Empty;
+
+            var historico = abertos
+                .Where(h => h.RdsSessionId == e.SessionId
+                         && h.LogonTime <= quando.AddMinutes(1)
+                         && (h.LogoffTime == null || h.LogoffTime >= quando.AddMinutes(-1)))
+                .OrderByDescending(h => h.LogonTime)
+                .FirstOrDefault()
+                ?? await _db.SessionHistories
+                    .Where(h => h.ServerName == server.Name
+                             && h.RdsSessionId == e.SessionId
+                             && h.LogonTime <= quando.AddMinutes(1)
+                             && (h.LogoffTime == null || h.LogoffTime >= quando.AddMinutes(-1)))
+                    .OrderByDescending(h => h.LogonTime)
+                    .FirstOrDefaultAsync();
+
+            _db.SessionEvents.Add(new SessionEvent
+            {
+                ServerName     = server.Name,
+                RecordId       = e.RecordId,
+                Tipo           = tipo,
+                DataHora       = quando,
+                RdsSessionId   = e.SessionId,
+                Username       = usuario,
+                ClientIp       = Opcional(e.ClientIp, 64),
+                MotivoCodigo   = tipo == SessionEventType.Desconexao ? e.ReasonCode : null,
+                SessionHistory = historico,
+            });
+            novos++;
+
+            // Reconexão traz o IP de onde o usuário voltou
+            if (tipo == SessionEventType.Reconexao && historico is not null
+                && !string.IsNullOrWhiteSpace(e.ClientIp) && !e.ClientIp.Equals("LOCAL", StringComparison.OrdinalIgnoreCase))
+                historico.ClientIp = Opcional(e.ClientIp, 64);
+        }
+
+        if (novos > 0)
+            _log.LogInformation("{Server}: {Qtd} desconexão(ões)/reconexão(ões) registrada(s).", server.Name, novos);
+    }
 
     /// <summary>
     /// Converte o horário recebido do agente para UTC. Agentes atuais já

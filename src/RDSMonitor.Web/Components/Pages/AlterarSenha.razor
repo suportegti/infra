@@ -13,8 +13,16 @@
             <i class="fa-solid fa-key"></i>
         </div>
 
-        <h1>Alterar senha</h1>
+        <h1>@(Obrigatoria ? "Defina sua senha" : "Alterar senha")</h1>
         <p class="login-subtitle">Informe suas credenciais atuais e a nova senha.</p>
+
+        @if (Obrigatoria && Sucesso != "1")
+        {
+            <div class="login-alert login-alert-info" role="status">
+                <i class="fa-solid fa-circle-info"></i>
+                Antes de entrar, defina uma senha pessoal. A senha atual é a que você recebeu do administrador.
+            </div>
+        }
 
         @if (Sucesso == "1")
         {
@@ -40,26 +48,45 @@
                 A confirmação não coincide com a nova senha.
             </div>
         }
+        else if (Erro == "igual")
+        {
+            <div class="login-alert" role="alert">
+                A nova senha precisa ser diferente da atual.
+            </div>
+        }
+        else if (Erro == "bloqueio")
+        {
+            <div class="login-alert" role="alert">
+                Conta bloqueada temporariamente por excesso de tentativas. Aguarde alguns minutos ou peça o desbloqueio a um administrador.
+            </div>
+        }
 
         <form method="post" action="/api/auth/change-password">
+            @if (Obrigatoria)
+            {
+                <input type="hidden" name="obrigatoria" value="1" />
+            }
             <label class="field" for="username">
                 <i class="fa-solid fa-user"></i>
                 <input id="username" name="username" type="text" placeholder="Usuário" value="@Usuario" autocomplete="username" required autofocus />
             </label>
 
-            <label class="field" for="senhaAtual">
+            <label class="field field-senha" for="senhaAtual">
                 <i class="fa-solid fa-lock"></i>
                 <input id="senhaAtual" name="senhaAtual" type="password" placeholder="Senha atual" autocomplete="current-password" required />
+                <button type="button" class="olho-senha" tabindex="-1" aria-label="Mostrar senha (mantenha pressionado)" title="Mantenha pressionado para ver a senha"><i class="fa-solid fa-eye"></i></button>
             </label>
 
-            <label class="field" for="novaSenha">
+            <label class="field field-senha" for="novaSenha">
                 <i class="fa-solid fa-key"></i>
                 <input id="novaSenha" name="novaSenha" type="password" placeholder="Nova senha (mínimo 8 caracteres)" autocomplete="new-password" minlength="8" required />
+                <button type="button" class="olho-senha" tabindex="-1" aria-label="Mostrar senha (mantenha pressionado)" title="Mantenha pressionado para ver a senha"><i class="fa-solid fa-eye"></i></button>
             </label>
 
-            <label class="field" for="confirmarSenha">
+            <label class="field field-senha" for="confirmarSenha">
                 <i class="fa-solid fa-key"></i>
                 <input id="confirmarSenha" name="confirmarSenha" type="password" placeholder="Confirmar nova senha" autocomplete="new-password" minlength="8" required />
+                <button type="button" class="olho-senha" tabindex="-1" aria-label="Mostrar senha (mantenha pressionado)" title="Mantenha pressionado para ver a senha"><i class="fa-solid fa-eye"></i></button>
             </label>
 
             <button type="submit" class="btn-entrar">SALVAR NOVA SENHA</button>
@@ -85,4 +112,9 @@
 
     [SupplyParameterFromQuery(Name = "usuario")]
     private string? Usuario { get; set; }
+
+    [SupplyParameterFromQuery(Name = "obrigatoria")]
+    private string? ObrigatoriaQuery { get; set; }
+
+    private bool Obrigatoria => ObrigatoriaQuery == "1";
 }

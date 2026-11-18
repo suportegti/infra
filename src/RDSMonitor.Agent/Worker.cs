@@ -14,6 +14,7 @@ public class Worker : BackgroundService
 {
     private readonly AgentSettings       _settings;
     private readonly SessionCollector    _sessions;
+    private readonly SessionEventCollector _eventos;
     private readonly ProcessCollector    _processes;
     private readonly ApiClient           _api;
     private readonly CommandExecutor     _executor;
@@ -27,6 +28,7 @@ public class Worker : BackgroundService
     public Worker(
         AgentSettings    settings,
         SessionCollector sessions,
+        SessionEventCollector eventos,
         ProcessCollector processes,
         ApiClient        api,
         CommandExecutor  executor,
@@ -36,6 +38,7 @@ public class Worker : BackgroundService
         _simulacao = simulacao;
         _settings  = settings;
         _sessions  = sessions;
+        _eventos   = eventos;
         _processes = processes;
         _api       = api;
         _executor  = executor;
@@ -77,12 +80,16 @@ public class Worker : BackgroundService
 
             var sessions  = _sessions.Collect();
             var processes = _processes.Collect();
+            var events    = _eventos.Coletar();
 
-            // Modo de simulação: acrescenta as sessões e processos fictícios
+            // Modo de simulação: acrescenta as sessões, processos e eventos fictícios
+            var eventosSimulados = new List<SessionEventInfo>();
             if (_simulacao.Habilitada)
             {
                 sessions.AddRange(_simulacao.GetSessions());
                 processes.AddRange(_simulacao.GetProcesses());
+                eventosSimulados = _simulacao.GetEvents();
+                events.AddRange(eventosSimulados);
             }
 
             // CPU e memória de cada sessão = soma dos processos dela
@@ -108,9 +115,15 @@ public class Worker : BackgroundService
                 MemoryTotalGb = totalGb,
                 Sessions      = sessions,
                 Processes     = processes,
+                Events        = events,
             };
 
-            await _api.SendHeartbeatAsync(heartbeat, ct);
+            // Eventos só saem da fila quando o portal aceita o heartbeat
+            if (await _api.SendHeartbeatAsync(heartbeat, ct))
+            {
+                _eventos.Confirmar(events);
+                if (eventosSimulados.Count > 0) _simulacao.ConfirmarEventos(eventosSimulados);
+            }
         }
         catch (OperationCanceledException) { /* serviço encerrando */ }
         catch (Exception ex)

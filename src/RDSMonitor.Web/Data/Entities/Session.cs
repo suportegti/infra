@@ -26,6 +26,12 @@ public class Session
     public double CpuPercent { get; set; }
     public double MemoryMb { get; set; }
     public DateTime LastSeen { get; set; }
+
+    /// <summary>Nome da máquina de onde o usuário conectou (último conhecido).</summary>
+    public string? ClientName { get; set; }
+
+    /// <summary>IP da máquina de onde o usuário conectou (último conhecido).</summary>
+    public string? ClientIp { get; set; }
 }
 
 public enum SessionState

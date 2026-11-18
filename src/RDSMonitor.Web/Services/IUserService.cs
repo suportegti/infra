@@ -7,6 +7,10 @@ public enum PasswordChangeResult
     Sucesso,
     CredenciaisInvalidas,
     NovaSenhaInvalida,
+    /// <summary>Conta bloqueada por tentativas (a troca também conta tentativas).</summary>
+    Bloqueado,
+    /// <summary>A nova senha é igual à atual.</summary>
+    SenhaIgualAtual,
 }
 
 public enum UserOperationResult
@@ -26,7 +30,15 @@ public interface IUserService
 
     Task RegistrarLoginAsync(int userId);
 
-    Task<PasswordChangeResult> AlterarSenhaAsync(string username, string senhaAtual, string novaSenha);
+    /// <summary>
+    /// Troca de senha pelo próprio usuário (exige a senha atual). Falhas contam
+    /// para o bloqueio por tentativas, como no login. Limpa a exigência de troca.
+    /// </summary>
+    Task<PasswordChangeResult> AlterarSenhaAsync(string username, string senhaAtual, string novaSenha, string? ip = null);
+
+    /// <summary>Histórico de acessos (logins, falhas, saídas, trocas de senha) de um usuário. Datas em UTC.</summary>
+    Task<(List<RDSMonitor.Web.Data.Entities.AcessoLog> Itens, bool Truncado)> ListarAcessosAsync(
+        string username, DateTime? deUtc, DateTime? ateUtc, int limite = 500);
 
     /// <summary>Lista todos os usuários do sistema (ativos e desabilitados), ordenados por login.</summary>
     Task<List<AppUser>> ListarAsync();
@@ -34,10 +46,10 @@ public interface IUserService
     Task<AppUser?> ObterPorIdAsync(int id);
 
     /// <summary>Cria um novo usuário do painel. Retorna o motivo caso não seja possível.</summary>
-    Task<UserOperationResult> CriarAsync(string username, string displayName, int perfilId, string senhaInicial);
+    Task<UserOperationResult> CriarAsync(string username, string displayName, int perfilId, string senhaInicial, bool exigirTroca = true);
 
     /// <summary>Atualiza nome de exibição e perfil; redefine a senha apenas se <paramref name="novaSenha"/> vier preenchida.</summary>
-    Task<UserOperationResult> EditarAsync(int id, string displayName, int perfilId, string? novaSenha);
+    Task<UserOperationResult> EditarAsync(int id, string displayName, int perfilId, string? novaSenha, bool exigirTroca = false);
 
     /// <summary>Habilita ou desabilita o usuário (alterna o campo Ativo).</summary>
     Task<UserOperationResult> AlternarAtivoAsync(int id);
@@ -53,5 +65,5 @@ public interface IUserService
     /// pela flag de manutenção "--reset-senha-admin" (ver Program.cs), para
     /// recuperar o acesso quando a senha do admin é esquecida.
     /// </summary>
-    Task<bool> RedefinirSenhaAsync(string username, string novaSenha);
+    Task<bool> RedefinirSenhaAsync(string username, string novaSenha, bool exigirTroca = false);
 }

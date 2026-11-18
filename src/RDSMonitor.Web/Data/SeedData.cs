@@ -74,6 +74,8 @@ public static class SeedData
             DisplayName = "Administrador do Sistema",
             Profile     = UserProfile.Administrador,
             PerfilId    = await db.Perfis.Where(p => p.Nome == Permissoes.PerfilAdministrador).Select(p => (int?)p.Id).FirstAsync(),
+            // A senha padrão é pública (documentação): o admin define a dele no primeiro acesso.
+            TrocarSenhaNoProximoLogin = true,
         };
         admin.PasswordHash = new PasswordHasher<AppUser>().HashPassword(admin, "Rds@1234");
 

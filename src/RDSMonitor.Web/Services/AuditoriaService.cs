@@ -74,13 +74,8 @@ public class AuditoriaService : IAuditoriaService
         return (itens, truncado);
     }
 
-    /// <summary>Horário local (do servidor do portal) → UTC, no mesmo formato gravado no banco.</summary>
-    internal static DateTime? Utc(DateTime? local) => local switch
-    {
-        null => null,
-        { Kind: DateTimeKind.Utc } d => DateTime.SpecifyKind(d, DateTimeKind.Unspecified),
-        { } d => DateTime.SpecifyKind(DateTime.SpecifyKind(d, DateTimeKind.Local).ToUniversalTime(), DateTimeKind.Unspecified),
-    };
+    /// <summary>Horário de Brasília (filtros da tela) → UTC, no mesmo formato gravado no banco.</summary>
+    internal static DateTime? Utc(DateTime? local) => Horario.ParaUtc(local);
 
     public Task<List<string>> ListarOperadoresAsync() =>
         _db.Auditoria.AsNoTracking().Select(a => a.OperadorLogin).Distinct().OrderBy(x => x).ToListAsync();

@@ -2,6 +2,7 @@
 @attribute [Authorize(Policy = Permissoes.UsuariosGerenciar)]
 @inject IUserService UserService
 @inject IPerfilService PerfilService
+@inject PresencaService Presenca
 
 <PageTitle>Usuários do Sistema · RDSManager</PageTitle>
 
@@ -71,16 +72,66 @@ else if (Erro == "ultimo-admin")
                     }
                 </select>
             </label>
-            <label class="field">
+            <label class="field field-senha">
                 <i class="fa-solid fa-key"></i>
                 <input name="senhaInicial" type="password" placeholder="Senha inicial (mín. 8 caracteres)" minlength="8" required />
+                <button type="button" class="olho-senha" tabindex="-1" aria-label="Mostrar senha (mantenha pressionado)" title="Mantenha pressionado para ver a senha"><i class="fa-solid fa-eye"></i></button>
             </label>
         </div>
+            <label class="toolbar-check" style="margin-top:.75rem;">
+                <input type="checkbox" name="exigirTroca" value="true" checked />
+                Exigir troca de senha no primeiro login
+            </label>
         <div class="form-actions">
             <button type="submit" class="btn-pill primary"><i class="fa-solid fa-plus"></i> Criar usuário</button>
         </div>
     </form>
 </details>
+
+<section class="online-panel" aria-labelledby="online-titulo">
+    <h2 id="online-titulo" class="relatorio-titulo">
+        <span class="status-dot active"></span> Conectados agora no portal
+        <span class="sub-label">@Online.Count usuário(s) · horário de Brasília</span>
+    </h2>
+    @if (Online.Count == 0)
+    {
+        <p class="dash-note">Ninguém conectado no momento.</p>
+    }
+    else
+    {
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Usuário</th>
+                    <th>Nome</th>
+                    <th>IP</th>
+                    <th>Entrou às</th>
+                    <th>Última atividade</th>
+                    <th>Telas abertas</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var o in Online)
+                {
+                    <tr>
+                        <td class="mono">@o.Username</td>
+                        <td>@o.Nome</td>
+                        <td class="mono">@(o.Ip ?? "—")</td>
+                        <td class="mono">@Horario.Fmt(o.EntrouEm, "dd/MM HH:mm")</td>
+                        <td class="mono">@Horario.Fmt(o.UltimaAtividade, "HH:mm:ss")</td>
+                        <td class="mono">@(o.TelasAbertas == 0 ? "—" : o.TelasAbertas.ToString())</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+    <p class="dash-note">
+        Conta como conectado quem está com uma tela aberta ou usou o portal nos últimos @((int)PresencaService.JanelaInatividade.TotalMinutes) minutos.
+        A lista recomeça vazia se o serviço do portal for reiniciado.
+    </p>
+</section>
+
+<h2 class="relatorio-titulo"><i class="fa-solid fa-users"></i> Todos os usuários</h2>
 
 <table class="data-table">
     <thead>
@@ -89,7 +140,7 @@ else if (Erro == "ultimo-admin")
             <th>Nome</th>
             <th>Perfil</th>
             <th>Status</th>
-            <th>Último login</th>
+            <th>Último login <span class="sub-label">(Brasília)</span></th>
             <th>Ações</th>
         </tr>
     </thead>
@@ -97,7 +148,13 @@ else if (Erro == "ultimo-admin")
         @foreach (var usuario in ListaUsuarios)
         {
             <tr>
-                <td class="mono">@usuario.Username</td>
+                <td class="mono">
+                    @usuario.Username
+                    @if (Presenca.EstaOnline(usuario.Username))
+                    {
+                        <span class="badge bg-success" title="Conectado ao portal agora"><span class="status-dot active"></span> online</span>
+                    }
+                </td>
                 <td>@usuario.DisplayName</td>
                 <td><span class="badge bg-secondary">@(usuario.Perfil?.Nome ?? "Sem perfil")</span></td>
                 <td>
@@ -106,13 +163,22 @@ else if (Erro == "ultimo-admin")
                     @if (Bloqueado(usuario))
                     {
                         <span class="badge bg-warning text-dark" title="Bloqueado por tentativas de login">
-                            <i class="fa-solid fa-lock"></i> Bloqueado até @usuario.LockoutEnd!.Value.ToLocalTime().ToString("HH:mm")
+                            <i class="fa-solid fa-lock"></i> Bloqueado até @Horario.Fmt(usuario.LockoutEnd!.Value, "HH:mm")
+                        </span>
+                    }
+                    @if (usuario.TrocarSenhaNoProximoLogin)
+                    {
+                        <span class="badge bg-info text-dark" title="O usuário vai definir uma nova senha no próximo login">
+                            <i class="fa-solid fa-key"></i> Troca de senha pendente
                         </span>
                     }
                 </td>
-                <td class="mono">@(usuario.UltimoLogin?.ToString("dd/MM/yyyy HH:mm") ?? "—")</td>
+                <td class="mono">@Horario.Fmt(usuario.UltimoLogin)</td>
                 <td class="acoes">
                     <a class="btn-pill" href="@($"usuarios/editar/{usuario.Id}")"><i class="fa-solid fa-pen"></i> Editar</a>
+                    <a class="btn-pill" href="@($"usuarios/{usuario.Id}/acessos")" title="Todos os logins, falhas, saídas e trocas de senha deste usuário">
+                        <i class="fa-solid fa-clock-rotate-left"></i> Acessos
+                    </a>
                     @if (Bloqueado(usuario))
                     {
                         <form method="post" action="/api/usuarios/desbloquear" style="display:inline">
@@ -152,6 +218,7 @@ else if (Erro == "ultimo-admin")
     private string? Erro { get; set; }
 
     private List<AppUser> ListaUsuarios { get; set; } = new();
+    private List<UsuarioOnline> Online { get; set; } = new();
     private List<RDSMonitor.Web.Data.Entities.Perfil> Perfis { get; set; } = new();
 
     private static bool Bloqueado(AppUser u) => u.LockoutEnd is { } fim && fim > DateTime.UtcNow;
@@ -159,6 +226,7 @@ else if (Erro == "ultimo-admin")
     protected override async Task OnInitializedAsync()
     {
         ListaUsuarios = await UserService.ListarAsync();
+        Online        = Presenca.Online();
         Perfis        = await PerfilService.ListarParaSelecaoAsync();
     }
 }

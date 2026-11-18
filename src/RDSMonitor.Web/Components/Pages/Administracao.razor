@@ -104,10 +104,10 @@ else
                         @cmd.Status
                     </td>
                     <td>@(cmd.CreatedByUsername ?? "—")</td>
-                    <td class="mono">@cmd.CreatedAt.ToLocalTime().ToString("dd/MM HH:mm:ss")</td>
+                    <td class="mono">@Horario.Fmt(cmd.CreatedAt, "dd/MM HH:mm:ss")</td>
                     <td class="mono">
                         @(cmd.ExecutedAt.HasValue
-                            ? cmd.ExecutedAt.Value.ToLocalTime().ToString("dd/MM HH:mm:ss")
+                            ? Horario.Fmt(cmd.ExecutedAt.Value, "dd/MM HH:mm:ss")
                             : "—")
                     </td>
                     <td style="font-size:.8rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"

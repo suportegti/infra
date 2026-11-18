@@ -83,6 +83,8 @@ public class SessionCollector
             State           = estado,
             LogonTime       = s.LogonUtc ?? DateTime.UtcNow,
             IdleTimeMinutes = s.OciosidadeMinutos,
+            ClientName      = s.ClienteNome,
+            ClientIp        = s.ClienteIp,
         };
     }
 

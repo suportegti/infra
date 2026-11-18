@@ -23,4 +23,14 @@ public class SessionHistory
 
     /// <summary>Usuário do portal que ordenou o logoff, quando LogoffReason = "Admin".</summary>
     public string? AdminUsername { get; set; }
+
+    /// <summary>Cliente do servidor no momento da sessão (cópia de Server.Cliente).</summary>
+    public string? Cliente { get; set; }
+
+    /// <summary>Máquina e IP de origem (último conhecido; muda se o usuário reconectar de outro lugar).</summary>
+    public string? ClientName { get; set; }
+    public string? ClientIp { get; set; }
+
+    /// <summary>Desconexões e reconexões desta sessão (eventos 24 e 25 do Windows).</summary>
+    public List<SessionEvent> Eventos { get; set; } = new();
 }

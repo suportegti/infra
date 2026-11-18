@@ -28,4 +28,10 @@ public class AppUser
 
     /// <summary>Enquanto estiver no futuro (UTC), o login é recusado mesmo com a senha certa.</summary>
     public DateTime? LockoutEnd { get; set; }
+
+    /// <summary>
+    /// Obriga o usuário a definir uma senha própria antes de entrar no portal.
+    /// Marcado para usuários novos e quando o administrador redefine a senha.
+    /// </summary>
+    public bool TrocarSenhaNoProximoLogin { get; set; }
 }

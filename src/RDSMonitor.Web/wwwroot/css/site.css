@@ -1508,3 +1508,48 @@ mark.hl {
 }
 .relatorio-kpi span { font-size: 0.75rem; color: var(--text-muted); }
 .relatorio-kpi strong { font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+
+/* ── 1.5.0: aviso informativo, conectados agora ───────────── */
+.login-alert-info {
+    background: rgba(77, 154, 255, 0.12);
+    border-color: rgba(77, 154, 255, 0.45);
+    color: #3b82f6;
+}
+.online-panel { margin-bottom: 1.5rem; }
+.online-panel .relatorio-titulo .sub-label { font-weight: 400; }
+.badge .status-dot { width: 7px; height: 7px; margin-right: 2px; }
+
+/* ── Olho dos campos de senha (mostra enquanto pressionado) ─ */
+.field-senha input { padding-right: 2.75rem; }
+.field .olho-senha {
+    position: absolute;
+    right: 0.45rem;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 2rem;
+    height: 2rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 0;
+    border-radius: 6px;
+    color: var(--text-muted);
+    cursor: pointer;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+}
+.field .olho-senha i {
+    position: static;
+    transform: none;
+    font-size: 0.95rem;
+    color: inherit;
+    pointer-events: none;
+}
+.field .olho-senha:hover { color: var(--text); background: rgba(127, 127, 127, 0.12); }
+.field .olho-senha.pressionado { color: var(--accent); }
+/* Esconde o "olho" nativo do Edge para não aparecer dois */
+.field-senha input::-ms-reveal,
+.field-senha input::-ms-clear { display: none; }

@@ -25,7 +25,8 @@ internal static class DiagnosticoSessoes
             if (wts.Count == 0) Console.WriteLine("   nenhuma sessão com usuário");
             foreach (var s in wts)
                 Console.WriteLine($"   ID {s.SessionId,-4} {Usuario(s.Dominio, s.Usuario),-30} estado={s.Estado,-13} " +
-                                  $"estação={s.NomeEstacao ?? "(vazio)",-14} logon={s.LogonUtc?.ToLocalTime().ToString("dd/MM HH:mm") ?? "?"} ocioso={s.OciosidadeMinutos} min");
+                                  $"estação={s.NomeEstacao ?? "(vazio)",-14} logon={s.LogonUtc?.ToLocalTime().ToString("dd/MM HH:mm") ?? "?"} ocioso={s.OciosidadeMinutos} min " +
+                                  $"origem={s.ClienteNome ?? "-"} / {s.ClienteIp ?? "-"}");
         }
         catch (Exception ex)
         {
@@ -43,7 +44,18 @@ internal static class DiagnosticoSessoes
         Console.WriteLine($"   total: {enviadas.Count} sessão(ões), {desc} desconectada(s)");
 
         Console.WriteLine();
-        Console.WriteLine("3) quser (comparação)");
+        Console.WriteLine("3) Desconexões (24) e reconexões (25) das últimas 24 h no log do Windows");
+        var eventos = new SessionEventCollector(NullLogger<SessionEventCollector>.Instance).Coletar();
+        if (eventos.Count == 0)
+            Console.WriteLine($"   nenhum evento (ou sem permissão para ler {SessionEventCollector.LogName})");
+        foreach (var e in eventos.TakeLast(30))
+            Console.WriteLine($"   {e.TimeUtc.ToLocalTime():dd/MM HH:mm:ss} {(e.EventId == 24 ? "DESCONECTOU" : "RECONECTOU "),-11} " +
+                              $"sessão {e.SessionId,-4} {e.Username,-25} origem={e.ClientIp ?? "-"}" +
+                              (e.ReasonCode is { } m ? $" motivo={m}" : ""));
+        if (eventos.Count > 30) Console.WriteLine($"   ... {eventos.Count - 30} evento(s) anteriores omitidos");
+
+        Console.WriteLine();
+        Console.WriteLine("4) quser (comparação)");
         try
         {
             var psi = new ProcessStartInfo("quser")

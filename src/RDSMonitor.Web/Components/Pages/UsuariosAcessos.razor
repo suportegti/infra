@@ -1,0 +1,105 @@
+@page "/usuarios/{Id:int}/acessos"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = Permissoes.UsuariosGerenciar)]
+@inject IUserService UserService
+@inject PresencaService Presenca
+
+<PageTitle>Histórico de acessos · RDSManager</PageTitle>
+
+@if (usuario is null)
+{
+    <div class="dash-header"><h1>Histórico de acessos</h1></div>
+    <p class="dash-note">@(carregado ? "Usuário não encontrado." : "Carregando…") <a href="usuarios">Voltar para Usuários do sistema</a></p>
+}
+else
+{
+    <div class="dash-header">
+        <h1>Histórico de acessos · @usuario.Username</h1>
+        <p>
+            @usuario.DisplayName · @(usuario.Perfil?.Nome ?? "Sem perfil") ·
+            @if (Presenca.EstaOnline(usuario.Username))
+            {
+                <span><span class="status-dot active"></span> conectado agora</span>
+            }
+            else
+            {
+                <span>último login @Horario.Fmt(usuario.UltimoLogin)</span>
+            }
+            · horário de Brasília
+        </p>
+    </div>
+
+    <section class="form-panel audit-filtros">
+        <FiltroPeriodo Periodo="periodo" OnAlterado="PesquisarAsync" />
+        <div class="form-actions">
+            <a class="btn-pill" href="usuarios"><i class="fa-solid fa-arrow-left"></i> Voltar</a>
+        </div>
+    </section>
+
+    @if (itens.Count > 0)
+    {
+        <div class="relatorio-resumo" role="group" aria-label="Resumo do período">
+            <div class="relatorio-kpi"><span>Logins</span><strong>@itens.Count(a => a.Resultado == AcessoResultado.Sucesso)</strong></div>
+            <div class="relatorio-kpi"><span>Senha incorreta</span><strong>@itens.Count(a => a.Resultado == AcessoResultado.SenhaIncorreta)</strong></div>
+            <div class="relatorio-kpi"><span>Bloqueios</span><strong>@itens.Count(a => a.Resultado == AcessoResultado.Bloqueado)</strong></div>
+            <div class="relatorio-kpi"><span>IPs distintos</span><strong>@itens.Where(a => a.Ip != null).Select(a => a.Ip).Distinct().Count()</strong></div>
+        </div>
+    }
+
+    <p class="search-summary" role="status">
+        <span><strong>@itens.Count</strong> registro(s)@(truncado ? " — exibindo os 500 mais recentes; reduza o período" : "").</span>
+    </p>
+
+    @if (itens.Count > 0)
+    {
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Data/hora</th>
+                    <th>Evento</th>
+                    <th>IP</th>
+                    <th>Detalhe</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var a in itens)
+                {
+                    <tr>
+                        <td class="mono">@Horario.Fmt(a.DataHora, "dd/MM/yyyy HH:mm:ss")</td>
+                        <td><span class="status-dot @AcessoLog.Css(a.Resultado)"></span> @AcessoLog.Descrever(a.Resultado)</td>
+                        <td class="mono">@(a.Ip ?? "—")</td>
+                        <td>@(a.Detalhe ?? "")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+    else
+    {
+        <p class="dash-note">Nenhum acesso registrado nesse período.</p>
+    }
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private readonly PeriodoFiltro periodo = new("30d");
+    private AppUser? usuario;
+    private List<AcessoLog> itens = new();
+    private bool truncado;
+    private bool carregado;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        usuario   = await UserService.ObterPorIdAsync(Id);
+        carregado = true;
+        await PesquisarAsync();
+    }
+
+    private async Task PesquisarAsync()
+    {
+        if (usuario is null || periodo.Invalido) return;
+        (itens, truncado) = await UserService.ListarAcessosAsync(
+            usuario.Username, Horario.ParaUtc(periodo.DeLocal), Horario.ParaUtc(periodo.AteLocal));
+    }
+}

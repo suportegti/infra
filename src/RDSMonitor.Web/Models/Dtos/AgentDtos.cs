@@ -20,6 +20,22 @@ public class AgentHeartbeatDto
 
     public List<SessionInfoDto> Sessions { get; set; } = new();
     public List<ProcessInfoDto> Processes { get; set; } = new();
+
+    /// <summary>Desconexões/reconexões do log do Windows (agente 1.5.0 ou mais novo).</summary>
+    public List<SessionEventDto> Events { get; set; } = new();
+}
+
+public class SessionEventDto
+{
+    public long RecordId { get; set; }
+    public int EventId { get; set; }
+    /// <summary>"Disconnect" ou "Reconnect".</summary>
+    public string Type { get; set; } = string.Empty;
+    public int SessionId { get; set; }
+    public string Username { get; set; } = string.Empty;
+    public string? ClientIp { get; set; }
+    public DateTime TimeUtc { get; set; }
+    public int? ReasonCode { get; set; }
 }
 
 public class SessionInfoDto
@@ -42,6 +58,10 @@ public class SessionInfoDto
 
     /// <summary>Memória total (working set) dos processos do usuário, em MB.</summary>
     public double MemoryMb { get; set; }
+
+    /// <summary>Máquina e IP de onde o usuário conectou (agente 1.5.0 ou mais novo).</summary>
+    public string? ClientName { get; set; }
+    public string? ClientIp { get; set; }
 }
 
 public class ProcessInfoDto

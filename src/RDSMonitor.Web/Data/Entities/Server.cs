@@ -15,6 +15,9 @@ public class Server
     /// <summary>Nome amigável opcional, editável no portal.</summary>
     public string? DisplayName { get; set; }
 
+    /// <summary>Cliente (empresa) atendido pelo servidor. Usado como filtro em Sessões e Relatórios.</summary>
+    public string? Cliente { get; set; }
+
     /// <summary>Verdadeiro se o último heartbeat chegou há menos de 2 minutos.</summary>
     public bool IsOnline { get; set; }
 

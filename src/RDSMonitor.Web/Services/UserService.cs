@@ -61,12 +61,10 @@ public class UserService : IUserService
         }
     }
 
-    public async Task<PasswordChangeResult> AlterarSenhaAsync(string username, string senhaAtual, string novaSenha)
+    public async Task<PasswordChangeResult> AlterarSenhaAsync(string username, string senhaAtual, string novaSenha, string? ip = null)
     {
-        if (string.IsNullOrWhiteSpace(novaSenha) || novaSenha.Length < 8)
-        {
-            return PasswordChangeResult.NovaSenhaInvalida;
-        }
+        username = (username ?? string.Empty).Trim();
+        var agora = DateTime.UtcNow;
 
         var user = await _db.Users.FirstOrDefaultAsync(u =>
             u.Username.ToLower() == username.ToLower() && u.Ativo);
@@ -76,17 +74,69 @@ public class UserService : IUserService
             return PasswordChangeResult.CredenciaisInvalidas;
         }
 
-        var resultado = _hasher.VerifyHashedPassword(user, user.PasswordHash, senhaAtual);
+        if (user.LockoutEnd is { } fim && fim > agora)
+        {
+            return PasswordChangeResult.Bloqueado;
+        }
+
+        var resultado = _hasher.VerifyHashedPassword(user, user.PasswordHash, senhaAtual ?? string.Empty);
 
         if (resultado == PasswordVerificationResult.Failed)
         {
+            // Mesma regra do login: a tela de troca não pode virar atalho para força bruta
+            user.AccessFailedCount++;
+            if (user.AccessFailedCount >= AutenticacaoService.MaxTentativas)
+            {
+                user.AccessFailedCount = 0;
+                user.LockoutEnd        = agora + AutenticacaoService.JanelaBloqueio;
+            }
+            Registrar(user.Username, ip, RDSMonitor.Web.Data.Entities.AcessoResultado.SenhaIncorreta, "troca de senha");
+            await _db.SaveChangesAsync();
             return PasswordChangeResult.CredenciaisInvalidas;
         }
 
-        user.PasswordHash = _hasher.HashPassword(user, novaSenha);
+        if (string.IsNullOrWhiteSpace(novaSenha) || novaSenha.Length < 8)
+        {
+            return PasswordChangeResult.NovaSenhaInvalida;
+        }
+
+        if (string.Equals(novaSenha, senhaAtual, StringComparison.Ordinal))
+        {
+            return PasswordChangeResult.SenhaIgualAtual;
+        }
+
+        user.PasswordHash              = _hasher.HashPassword(user, novaSenha);
+        user.TrocarSenhaNoProximoLogin = false;
+        user.AccessFailedCount         = 0;
+        Registrar(user.Username, ip, RDSMonitor.Web.Data.Entities.AcessoResultado.SenhaAlterada);
         await _db.SaveChangesAsync();
 
         return PasswordChangeResult.Sucesso;
+    }
+
+    private void Registrar(string usuario, string? ip, RDSMonitor.Web.Data.Entities.AcessoResultado resultado, string? detalhe = null)
+        => _db.AcessoLogs.Add(new RDSMonitor.Web.Data.Entities.AcessoLog
+        {
+            DataHora  = DateTime.UtcNow,
+            Usuario   = usuario.Length > 100 ? usuario[..100] : usuario,
+            Ip        = ip is { Length: > 64 } ? ip[..64] : ip,
+            Resultado = resultado,
+            Detalhe   = detalhe,
+        });
+
+    public async Task<(List<RDSMonitor.Web.Data.Entities.AcessoLog>, bool)> ListarAcessosAsync(
+        string username, DateTime? deUtc, DateTime? ateUtc, int limite = 500)
+    {
+        var u = username.ToLower();
+        var q = _db.AcessoLogs.AsNoTracking().Where(a => a.Usuario.ToLower() == u);
+        if (deUtc is { } de)   q = q.Where(a => a.DataHora >= de);
+        if (ateUtc is { } ate) q = q.Where(a => a.DataHora <= ate);
+
+        limite = Math.Clamp(limite, 1, 10_000);
+        var itens = await q.OrderByDescending(a => a.DataHora).Take(limite + 1).ToListAsync();
+        var truncado = itens.Count > limite;
+        if (truncado) itens.RemoveAt(itens.Count - 1);
+        return (itens, truncado);
     }
 
     public async Task<List<AppUser>> ListarAsync()
@@ -99,7 +149,7 @@ public class UserService : IUserService
         return await _db.Users.AsNoTracking().Include(u => u.Perfil).FirstOrDefaultAsync(u => u.Id == id);
     }
 
-    public async Task<UserOperationResult> CriarAsync(string username, string displayName, int perfilId, string senhaInicial)
+    public async Task<UserOperationResult> CriarAsync(string username, string displayName, int perfilId, string senhaInicial, bool exigirTroca = true)
     {
         username = username?.Trim() ?? string.Empty;
         displayName = displayName?.Trim() ?? string.Empty;
@@ -132,6 +182,7 @@ public class UserService : IUserService
             DisplayName = displayName,
             PerfilId = perfilId,
             Ativo = true,
+            TrocarSenhaNoProximoLogin = exigirTroca,
         };
 
         novoUsuario.PasswordHash = _hasher.HashPassword(novoUsuario, senhaInicial);
@@ -142,7 +193,7 @@ public class UserService : IUserService
         return UserOperationResult.Sucesso;
     }
 
-    public async Task<UserOperationResult> EditarAsync(int id, string displayName, int perfilId, string? novaSenha)
+    public async Task<UserOperationResult> EditarAsync(int id, string displayName, int perfilId, string? novaSenha, bool exigirTroca = false)
     {
         var user = await _db.Users.FindAsync(id);
 
@@ -180,6 +231,8 @@ public class UserService : IUserService
         {
             user.PasswordHash = _hasher.HashPassword(user, novaSenha);
         }
+
+        user.TrocarSenhaNoProximoLogin = exigirTroca;
 
         await _db.SaveChangesAsync();
         _permissoes.Invalidar();
@@ -230,7 +283,7 @@ public class UserService : IUserService
         return true;
     }
 
-    public async Task<bool> RedefinirSenhaAsync(string username, string novaSenha)
+    public async Task<bool> RedefinirSenhaAsync(string username, string novaSenha, bool exigirTroca = false)
     {
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Username.ToLower() == username.ToLower());
 
@@ -241,6 +294,7 @@ public class UserService : IUserService
 
         user.PasswordHash = _hasher.HashPassword(user, novaSenha);
         user.Ativo = true;
+        user.TrocarSenhaNoProximoLogin = exigirTroca;
 
         // Recuperação de acesso: zera o bloqueio por tentativas, se houver
         user.AccessFailedCount = 0;

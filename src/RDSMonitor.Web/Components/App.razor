@@ -24,7 +24,7 @@
 <body>
     <Routes />
     <script src="_framework/blazor.web.js"></script>
-    <script src="js/site.js"></script>
+    <script src="js/site.js?v=@VersaoJs"></script>
 </body>
 </html>
 
@@ -35,4 +35,8 @@
     private static string? versaoCss;
     private string VersaoCss => versaoCss ??=
         File.GetLastWriteTimeUtc(Path.Combine(Env.WebRootPath, "css", "site.css")).Ticks.ToString("x");
+
+    private static string? versaoJs;
+    private string VersaoJs => versaoJs ??=
+        File.GetLastWriteTimeUtc(Path.Combine(Env.WebRootPath, "js", "site.js")).Ticks.ToString("x");
 }

@@ -92,7 +92,7 @@
             @foreach (var a in itens)
             {
                 <tr>
-                    <td class="mono">@a.DataHora.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss")</td>
+                    <td class="mono">@Horario.Fmt(a.DataHora, "dd/MM/yyyy HH:mm:ss")</td>
                     <td>
                         @(a.OperadorNome ?? a.OperadorLogin)
                         <span class="sub-label">@a.OperadorLogin@(a.OperadorPerfil is null ? "" : $" · {a.OperadorPerfil}")</span>
@@ -114,7 +114,7 @@
                         @NomeStatus(a.Status)
                         @if (a.ConcluidoEm is { } fim)
                         {
-                            <span class="sub-label mono">@fim.ToLocalTime().ToString("HH:mm:ss")</span>
+                            <span class="sub-label mono">@Horario.Fmt(fim, "HH:mm:ss")</span>
                         }
                         @if (!string.IsNullOrEmpty(a.Resultado))
                         {
@@ -151,7 +151,7 @@ else if (!carregando)
                     @foreach (var a in acessos)
                     {
                         <tr>
-                            <td class="mono">@a.DataHora.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss")</td>
+                            <td class="mono">@Horario.Fmt(a.DataHora, "dd/MM/yyyy HH:mm:ss")</td>
                             <td>@a.Usuario</td>
                             <td class="mono">@(a.Ip ?? "—")</td>
                             <td>
@@ -213,19 +213,9 @@ else if (!carregando)
         carregando = false;
     }
 
-    private static string NomeAcesso(AcessoResultado r) => r switch
-    {
-        AcessoResultado.Sucesso             => "Sucesso",
-        AcessoResultado.SenhaIncorreta      => "Senha incorreta",
-        AcessoResultado.UsuarioDesconhecido => "Usuário inexistente",
-        AcessoResultado.UsuarioDesabilitado => "Usuário desabilitado",
-        AcessoResultado.Bloqueado           => "Bloqueado",
-        AcessoResultado.LimiteDeTaxa        => "Limite por IP",
-        _                                   => r.ToString(),
-    };
+    private static string NomeAcesso(AcessoResultado r) => AcessoLog.Descrever(r);
 
-    private static string AcessoCss(AcessoResultado r) =>
-        r == AcessoResultado.Sucesso ? "active" : "disconnected";
+    private static string AcessoCss(AcessoResultado r) => AcessoLog.Css(r);
 
     private async Task LimparAsync()
     {

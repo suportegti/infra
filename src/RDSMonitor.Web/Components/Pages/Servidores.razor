@@ -37,6 +37,10 @@
                         <i class="fa-solid fa-tag"></i>
                         <input @bind="novoDisplay" placeholder="Nome amigável (opcional)" maxlength="150" />
                     </label>
+                    <label class="field">
+                        <i class="fa-solid fa-building"></i>
+                        <input @bind="novoCliente" placeholder="Cliente (opcional)" maxlength="100" list="clientes-existentes" />
+                    </label>
                 </div>
                 <div class="form-actions">
                     <button class="btn-pill primary" @onclick="CriarAsync" disabled="@string.IsNullOrWhiteSpace(novoNome)">
@@ -52,10 +56,28 @@
     </Authorized>
 </AuthorizeView>
 
+<datalist id="clientes-existentes">
+    @foreach (var c in clientes) { <option value="@c"></option> }
+</datalist>
+
+@if (clientes.Count > 0)
+{
+    <div class="toolbar">
+        <div class="toolbar-search" style="flex:0 1 220px;min-width:180px;">
+            <i class="fa-solid fa-building"></i>
+            <select @bind="filtroCliente" class="toolbar-select" aria-label="Filtrar por cliente">
+                <option value="">Todos os clientes</option>
+                @foreach (var c in clientes) { <option value="@c">@c</option> }
+            </select>
+        </div>
+    </div>
+}
+
 <table class="data-table">
     <thead>
         <tr>
             <th>Servidor</th>
+            <th>Cliente</th>
             <th>Estado</th>
             <th>Sessões</th>
             <th>CPU</th>
@@ -65,7 +87,7 @@
         </tr>
     </thead>
     <tbody>
-        @foreach (var sv in servidores)
+        @foreach (var sv in servidores.Where(s => string.IsNullOrEmpty(filtroCliente) || s.Cliente == filtroCliente))
         {
             var emEdicao = editandoId == sv.Id;
             <tr class="@(sv.IsEnabled ? "" : "row-disabled")">
@@ -87,6 +109,18 @@
                     }
                 </td>
                 <td>
+                    @if (emEdicao)
+                    {
+                        <div class="inline-edit">
+                            <input @bind="editCliente" maxlength="100" placeholder="Cliente" aria-label="Cliente" list="clientes-existentes" />
+                        </div>
+                    }
+                    else
+                    {
+                        <span>@(sv.Cliente ?? "—")</span>
+                    }
+                </td>
+                <td>
                     @if (!sv.IsEnabled)
                     {
                         <span class="status-dot disconnected"></span><span>Desabilitado</span>
@@ -101,7 +135,9 @@
                         <span class="status-dot disconnected"></span><span>Offline</span>
                     }
                 </td>
-                <td class="mono">@sv.Sessions.Count</td>
+                <td class="mono">
+                    <a href="@($"sessoes?servidor={sv.Id}")" title="Ver as sessões deste servidor">@sv.Sessions.Count</a>
+                </td>
                 <td class="mono">@(sv.IsOnline ? $"{sv.CpuPercent:0.#}%" : "—")</td>
                 <td class="mono">
                     @if (sv.IsOnline)
@@ -112,7 +148,7 @@
                 </td>
                 <td class="mono">
                     @(sv.LastHeartbeat.HasValue
-                        ? sv.LastHeartbeat.Value.ToLocalTime().ToString("dd/MM HH:mm:ss")
+                        ? Horario.Fmt(sv.LastHeartbeat.Value, "dd/MM HH:mm:ss")
                         : "Nunca")
                 </td>
                 @if (podeGerenciar || podeReiniciar)
@@ -176,10 +212,14 @@
     private bool    novoAberto;
     private string  novoNome    = string.Empty;
     private string? novoDisplay;
+    private string? novoCliente;
+    private List<string> clientes = new();
+    private string  filtroCliente = string.Empty;
 
     private int?    editandoId;
     private string  editNome    = string.Empty;
     private string? editDisplay;
+    private string? editCliente;
 
     private System.Timers.Timer? _timer;
 
@@ -206,6 +246,8 @@
         podeGerenciar = p.Contains(Permissoes.ServidoresGerenciar);
         podeReiniciar = p.Contains(Permissoes.ServidoresReiniciar);
         servidores = await ServerService.GetAllWithSessionsAsync(incluirDesabilitados: true);
+        clientes   = servidores.Where(s => s.Cliente is not null).Select(s => s.Cliente!)
+                               .Distinct().OrderBy(c => c, StringComparer.CurrentCultureIgnoreCase).ToList();
     }
 
     // ── Cadastro ─────────────────────────────────────────────
@@ -214,11 +256,12 @@
     {
         if (!await PodeGerenciarAgoraAsync()) return;
         var nome = novoNome.Trim();
-        var r = await ServerService.CreateAsync(nome, novoDisplay);
+        var r = await ServerService.CreateAsync(nome, novoDisplay, novoCliente);
         if (r == ServerOperationResult.Sucesso)
         {
             novoNome = string.Empty;
             novoDisplay = null;
+            novoCliente = null;
             novoAberto = false;
         }
         Avisar(r, $"Servidor {nome} cadastrado. Instale o agente nele com ServerName = \"{nome}\".");
@@ -230,6 +273,7 @@
         editandoId  = sv.Id;
         editNome    = sv.Name;
         editDisplay = sv.DisplayName;
+        editCliente = sv.Cliente;
     }
 
     private void CancelarEdicao() => editandoId = null;
@@ -237,7 +281,7 @@
     private async Task SalvarEdicaoAsync(int id)
     {
         if (!await PodeGerenciarAgoraAsync()) return;
-        var r = await ServerService.UpdateAsync(id, editNome, editDisplay);
+        var r = await ServerService.UpdateAsync(id, editNome, editDisplay, editCliente);
         if (r == ServerOperationResult.Sucesso) editandoId = null;
         Avisar(r, $"Servidor {editNome.Trim()} atualizado. Se o nome mudou, ajuste também o ServerName no agente.");
         await CarregarAsync();
@@ -337,6 +381,7 @@
     private static IReadOnlyList<(string, string)> DetalhesServidor(Server sv) => new[]
     {
         ("Servidor", sv.DisplayName is null ? sv.Name : $"{sv.Name} ({sv.DisplayName})"),
+        ("Cliente",  sv.Cliente ?? "—"),
         ("Sessões",  sv.Sessions.Count.ToString()),
     };
 

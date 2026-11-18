@@ -14,9 +14,14 @@ internal static class WtsSessionApi
     private static readonly IntPtr ServidorLocal = IntPtr.Zero;   // WTS_CURRENT_SERVER_HANDLE
 
     // WTS_INFO_CLASS
-    private const int WTSUserName    = 5;
-    private const int WTSDomainName  = 7;
-    private const int WTSSessionInfo = 24;
+    private const int WTSUserName      = 5;
+    private const int WTSDomainName    = 7;
+    private const int WTSClientName    = 10;
+    private const int WTSClientAddress = 14;
+    private const int WTSSessionInfo   = 24;
+
+    private const int AF_INET  = 2;
+    private const int AF_INET6 = 23;
 
     /// <summary>WTS_CONNECTSTATE_CLASS.</summary>
     public enum EstadoWts
@@ -31,7 +36,9 @@ internal static class WtsSessionApi
         string?   NomeEstacao,
         EstadoWts Estado,
         DateTime? LogonUtc,
-        int       OciosidadeMinutos);
+        int       OciosidadeMinutos,
+        string?   ClienteNome,
+        string?   ClienteIp);
 
     // ── Enumeração ───────────────────────────────────────────────────────────
 
@@ -64,7 +71,9 @@ internal static class WtsSessionApi
                     string.IsNullOrWhiteSpace(info.pWinStationName) ? null : info.pWinStationName,
                     estado,
                     logon,
-                    ociosidade));
+                    ociosidade,
+                    Vazio(ConsultarTexto(info.SessionId, WTSClientName)),
+                    ConsultarIpCliente(info.SessionId)));
             }
         }
         finally
@@ -81,6 +90,44 @@ internal static class WtsSessionApi
             return null;
         try { return Marshal.PtrToStringUni(buffer); }
         finally { WTSFreeMemory(buffer); }
+    }
+
+    private static string? Vazio(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+    /// <summary>
+    /// IP da máquina do usuário (WTSClientAddress). Sessão de console ou
+    /// desconectada não tem endereço — retorna null.
+    /// </summary>
+    private static string? ConsultarIpCliente(int sessionId)
+    {
+        if (!WTSQuerySessionInformationW(ServidorLocal, sessionId, WTSClientAddress, out var buffer, out _))
+            return null;
+        try
+        {
+            var addr = Marshal.PtrToStructure<WTS_CLIENT_ADDRESS>(buffer);
+            if (addr.Address is null) return null;
+
+            // Para AF_INET os 4 bytes do IPv4 começam no deslocamento 2 do vetor.
+            if (addr.AddressFamily == AF_INET)
+            {
+                var ip = new System.Net.IPAddress(addr.Address.AsSpan(2, 4));
+                return ip.Equals(System.Net.IPAddress.Any) ? null : ip.ToString();
+            }
+            if (addr.AddressFamily == AF_INET6)
+            {
+                var ip = new System.Net.IPAddress(addr.Address.AsSpan(2, 16));
+                return ip.Equals(System.Net.IPAddress.IPv6Any) ? null : ip.ToString();
+            }
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            WTSFreeMemory(buffer);
+        }
     }
 
     /// <summary>
@@ -145,6 +192,13 @@ internal static class WtsSessionApi
         public int SessionId;
         [MarshalAs(UnmanagedType.LPWStr)] public string? pWinStationName;
         public int State;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WTS_CLIENT_ADDRESS
+    {
+        public int AddressFamily;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 20)] public byte[] Address;
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]

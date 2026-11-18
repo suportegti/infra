@@ -68,6 +68,10 @@ builder.Services.AddScoped<IAuditoriaService, AuditoriaService>();
 builder.Services.AddScoped<IRelatorioService, RelatorioService>();
 builder.Services.AddScoped<IAutenticacaoService, AutenticacaoService>();
 
+// Quem está usando o portal agora (tela Usuários do sistema)
+builder.Services.AddSingleton<PresencaService>();
+builder.Services.AddScoped<Microsoft.AspNetCore.Components.Server.Circuits.CircuitHandler, PresencaCircuitHandler>();
+
 // Limite de requisições por IP no login: trava ataques de força bruta mesmo que
 // o atacante alterne entre vários usuários. O bloqueio por conta (AutenticacaoService)
 // cuida das tentativas contra um único usuário.
@@ -126,6 +130,15 @@ app.UseAntiforgery();
 app.UseAuthentication();
 app.UseAuthorization();
 
+// Cada requisição autenticada marca o usuário como presente (lista "Conectados agora")
+app.Use(async (http, next) =>
+{
+    if (PresencaService.Login(http.User) is { } login)
+        http.RequestServices.GetRequiredService<PresencaService>()
+            .Viu(login, http.User.Identity?.Name ?? login, http.Connection.RemoteIpAddress?.ToString());
+    await next();
+});
+
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
@@ -144,6 +157,8 @@ app.MapPost("/api/auth/login", async (
 
         if (resultado.Status == AuthStatus.Bloqueado)
             return Results.Redirect($"/login?erro=bloqueio&min={resultado.BloqueioMinutos}");
+        if (resultado.Status == AuthStatus.TrocaDeSenhaExigida && resultado.Usuario is { } pendente)
+            return Results.Redirect($"/alterar-senha?obrigatoria=1&usuario={Uri.EscapeDataString(pendente.Username)}");
         if (resultado.Status != AuthStatus.Sucesso || resultado.Usuario is null)
             return Results.Redirect("/login?erro=1");
 
@@ -159,6 +174,7 @@ app.MapPost("/api/auth/login", async (
         var principal = new ClaimsPrincipal(identity);
 
         await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal);
+        http.RequestServices.GetRequiredService<PresencaService>().Entrou(user.Username, user.DisplayName, ip);
 
         // Só aceita retorno para uma página do próprio portal
         if (!string.IsNullOrWhiteSpace(returnUrl) && returnUrl.StartsWith('/') && !returnUrl.StartsWith("//"))
@@ -177,8 +193,13 @@ app.MapPost("/api/auth/login", async (
     .DisableAntiforgery()
     .RequireRateLimiting("login");
 
-app.MapPost("/api/auth/logout", async (HttpContext http) =>
+app.MapPost("/api/auth/logout", async (HttpContext http, IAutenticacaoService autenticacao, PresencaService presenca) =>
     {
+        if (PresencaService.Login(http.User) is { } login)
+        {
+            presenca.Saiu(login);
+            await autenticacao.RegistrarLogoutAsync(login, http.Connection.RemoteIpAddress?.ToString());
+        }
         await http.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
         return Results.Redirect("/login");
     })
@@ -187,27 +208,35 @@ app.MapPost("/api/auth/logout", async (HttpContext http) =>
 // Troca de senha autosserviço (tela /alterar-senha): exige usuário + senha
 // atual, pois ainda não há AD / Entra ID para uma recuperação por e-mail.
 app.MapPost("/api/auth/change-password", async (
+        HttpContext http,
         IUserService userService,
         [FromForm] string username,
         [FromForm] string senhaAtual,
         [FromForm] string novaSenha,
-        [FromForm] string confirmarSenha) =>
+        [FromForm] string confirmarSenha,
+        [FromForm] string? obrigatoria) =>
     {
-        var usuarioQs = Uri.EscapeDataString(username);
+        // Mantém o aviso de "troca obrigatória" quando a tela volta com erro
+        var extra     = obrigatoria == "1" ? "&obrigatoria=1" : "";
+        var usuarioQs = Uri.EscapeDataString(username) + extra;
 
         if (!string.Equals(novaSenha, confirmarSenha, StringComparison.Ordinal))
             return Results.Redirect($"/alterar-senha?erro=confirmacao&usuario={usuarioQs}");
 
-        var resultado = await userService.AlterarSenhaAsync(username, senhaAtual, novaSenha);
+        var resultado = await userService.AlterarSenhaAsync(username, senhaAtual, novaSenha,
+            http.Connection.RemoteIpAddress?.ToString());
 
         return resultado switch
         {
             PasswordChangeResult.Sucesso           => Results.Redirect("/alterar-senha?sucesso=1"),
             PasswordChangeResult.NovaSenhaInvalida => Results.Redirect($"/alterar-senha?erro=fraca&usuario={usuarioQs}"),
+            PasswordChangeResult.SenhaIgualAtual   => Results.Redirect($"/alterar-senha?erro=igual&usuario={usuarioQs}"),
+            PasswordChangeResult.Bloqueado         => Results.Redirect($"/alterar-senha?erro=bloqueio&usuario={usuarioQs}"),
             _                                      => Results.Redirect($"/alterar-senha?erro=credenciais&usuario={usuarioQs}"),
         };
     })
-    .DisableAntiforgery();
+    .DisableAntiforgery()
+    .RequireRateLimiting("login");
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Endpoints de usuários (ações de formulário no portal)
@@ -217,9 +246,11 @@ app.MapPost("/api/usuarios/criar", async (
         [FromForm] string username,
         [FromForm] string displayName,
         [FromForm] int perfilId,
-        [FromForm] string senhaInicial) =>
+        [FromForm] string senhaInicial,
+        [FromForm] string? exigirTroca) =>
     {
-        var resultado = await userService.CriarAsync(username, displayName, perfilId, senhaInicial);
+        var resultado = await userService.CriarAsync(username, displayName, perfilId, senhaInicial,
+            exigirTroca: exigirTroca == "true");
 
         return resultado switch
         {
@@ -255,7 +286,7 @@ app.MapPost("/api/usuarios/desbloquear", async (
     .RequireAuthorization(Permissoes.UsuariosGerenciar);
 
 // Exportação CSV da auditoria (mesmos filtros da tela /auditoria)
-// Exportações. As datas chegam em horário LOCAL do portal (yyyy-MM-ddTHH:mm[:ss[.fff]]) e são
+// Exportações. As datas chegam no horário de Brasília (yyyy-MM-ddTHH:mm[:ss[.fff]]) e são
 // lidas como texto para não sofrerem a conversão automática de fuso do model binding.
 static DateTime? DataLocal(string? s) =>
     DateTime.TryParseExact(s, new[] { "yyyy-MM-ddTHH:mm:ss.fff", "yyyy-MM-ddTHH:mm:ss", "yyyy-MM-ddTHH:mm", "yyyy-MM-dd" },
@@ -297,14 +328,14 @@ app.MapGet("/api/auditoria/csv", async (IAuditoriaService auditoria, HttpRequest
         sb.AppendLine("Data/hora;Operador;Nome;Perfil;Acao;Servidor;Sessao;Usuario alvo;Processo;PID;Detalhes;Status;Concluido em;Resultado");
         foreach (var a in itens)
             sb.AppendLine(string.Join(";",
-                C(a.DataHora.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss")), C(a.OperadorLogin), C(a.OperadorNome),
+                C(Horario.Fmt(a.DataHora, "dd/MM/yyyy HH:mm:ss")), C(a.OperadorLogin), C(a.OperadorNome),
                 C(a.OperadorPerfil), C(NomeAcao(a.Acao)), C(a.ServidorNome), C(a.SessaoId?.ToString()),
                 C(a.UsuarioAlvo), C(a.Processo), C(a.Pid?.ToString()), C(a.Detalhes), C(NomeStatus(a.Status)),
-                C(a.ConcluidoEm?.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss")), C(a.Resultado)));
+                C(Horario.Fmt(a.ConcluidoEm, "dd/MM/yyyy HH:mm:ss", "")), C(a.Resultado)));
 
         // BOM para o Excel abrir com acentuação correta
         var bytes = System.Text.Encoding.UTF8.GetPreamble().Concat(System.Text.Encoding.UTF8.GetBytes(sb.ToString())).ToArray();
-        return Results.File(bytes, "text/csv; charset=utf-8", $"auditoria-{DateTime.Now:yyyyMMdd-HHmm}.csv");
+        return Results.File(bytes, "text/csv; charset=utf-8", $"auditoria-{Horario.Agora:yyyyMMdd-HHmm}.csv");
     })
     .RequireAuthorization(Permissoes.AuditoriaVer);
 
@@ -322,40 +353,74 @@ app.MapGet("/api/auditoria/xlsx", async (IAuditoriaService auditoria, HttpReques
         };
         var linhas = itens.Select(a => new object?[]
         {
-            a.DataHora.ToLocalTime(), a.OperadorLogin, a.OperadorNome, a.OperadorPerfil, NomeAcao(a.Acao),
+            Horario.Br(a.DataHora), a.OperadorLogin, a.OperadorNome, a.OperadorPerfil, NomeAcao(a.Acao),
             a.ServidorNome, a.SessaoId, a.UsuarioAlvo, a.Processo, a.Pid, a.Detalhes, NomeStatus(a.Status),
-            a.ConcluidoEm?.ToLocalTime(), a.Resultado,
+            Horario.Br(a.ConcluidoEm), a.Resultado,
         });
         return Results.File(Xlsx.Gerar("Auditoria", colunas, linhas), Xlsx.ContentType,
-            $"auditoria-{DateTime.Now:yyyyMMdd-HHmm}.xlsx");
+            $"auditoria-{Horario.Agora:yyyyMMdd-HHmm}.xlsx");
     })
     .RequireAuthorization(Permissoes.AuditoriaVer);
 
-// GET /api/relatorios/sessoes.xlsx
+// GET /api/relatorios/sessoes.xlsx  e  /api/relatorios/desconexoes.xlsx (mesmos filtros da tela)
+static Task<(List<SessionHistory>, bool)> PesquisarRelatorioAsync(IRelatorioService relatorios, HttpRequest req)
+{
+    var q = req.Query;
+    return relatorios.PesquisarHistoricoAsync(new FiltroRelatorio
+    {
+        DeLocal  = DataLocal(q["de"]),
+        AteLocal = DataLocal(q["ate"]),
+        Servidor = q["servidor"], Cliente = q["cliente"], Usuario = q["usuario"], Situacao = q["situacao"],
+        Limite   = 50_000,
+    });
+}
+
 app.MapGet("/api/relatorios/sessoes.xlsx", async (IRelatorioService relatorios, HttpRequest req) =>
     {
-        var q = req.Query;
-        var (itens, _) = await relatorios.PesquisarHistoricoAsync(new FiltroRelatorio
-        {
-            DeLocal  = DataLocal(q["de"]),
-            AteLocal = DataLocal(q["ate"]),
-            Servidor = q["servidor"], Usuario = q["usuario"], Situacao = q["situacao"],
-            Limite   = 50_000,
-        });
+        var (itens, _) = await PesquisarRelatorioAsync(relatorios, req);
         var colunas = new XlsxColuna[]
         {
-            new("Servidor", Largura: 16), new("Usuário", Largura: 24), new("Sessão", XlsxTipo.Numero, 9),
+            new("Cliente", Largura: 18), new("Servidor", Largura: 16), new("Usuário", Largura: 24),
+            new("Máquina de origem", Largura: 20), new("IP de origem", Largura: 16), new("Sessão", XlsxTipo.Numero, 9),
             new("Login", XlsxTipo.DataHora, 20), new("Logoff", XlsxTipo.DataHora, 20),
             new("Situação", Largura: 12), new("Duração (h:mm)", XlsxTipo.Duracao, 15),
+            new("Desconexões", XlsxTipo.Numero, 13), new("Tempo desconectado (h:mm)", XlsxTipo.Duracao, 22),
             new("Encerramento", Largura: 14), new("Encerrado por", Largura: 18),
         };
         var linhas = itens.Select(h => new object?[]
         {
-            h.ServerName, h.Username, h.RdsSessionId, h.LogonTime.ToLocalTime(), h.LogoffTime?.ToLocalTime(),
-            h.LogoffTime is null ? "Ativa" : "Encerrada", relatorios.Duracao(h), h.LogoffReason, h.AdminUsername,
+            h.Cliente, h.ServerName, h.Username, h.ClientName, h.ClientIp, h.RdsSessionId,
+            Horario.Br(h.LogonTime), Horario.Br(h.LogoffTime),
+            h.LogoffTime is null ? "Ativa" : "Encerrada", relatorios.Duracao(h),
+            relatorios.Desconexoes(h), relatorios.TempoDesconectado(h),
+            h.LogoffReason, h.AdminUsername,
         });
         return Results.File(Xlsx.Gerar("Sessões", colunas, linhas), Xlsx.ContentType,
-            $"historico-sessoes-{DateTime.Now:yyyyMMdd-HHmm}.xlsx");
+            $"historico-sessoes-{Horario.Agora:yyyyMMdd-HHmm}.xlsx");
+    })
+    .RequireAuthorization(Permissoes.RelatoriosVer);
+
+app.MapGet("/api/relatorios/desconexoes.xlsx", async (IRelatorioService relatorios, HttpRequest req) =>
+    {
+        var (itens, _) = await PesquisarRelatorioAsync(relatorios, req);
+        var colunas = new XlsxColuna[]
+        {
+            new("Data/hora", XlsxTipo.DataHora, 20), new("Evento", Largura: 13), new("Motivo", Largura: 40),
+            new("Código do motivo", XlsxTipo.Numero, 16), new("Cliente", Largura: 18), new("Servidor", Largura: 16),
+            new("Usuário", Largura: 24), new("Sessão", XlsxTipo.Numero, 9), new("IP de origem", Largura: 16),
+            new("Login da sessão", XlsxTipo.DataHora, 20),
+        };
+        var linhas = itens
+            .SelectMany(h => h.Eventos.Select(e => (h, e)))
+            .OrderBy(x => x.e.DataHora)
+            .Select(x => new object?[]
+            {
+                Horario.Br(x.e.DataHora), x.e.Tipo == SessionEventType.Desconexao ? "Desconexão" : "Reconexão",
+                x.e.Motivo, x.e.MotivoCodigo, x.h.Cliente, x.h.ServerName, x.e.Username, x.e.RdsSessionId,
+                x.e.ClientIp, Horario.Br(x.h.LogonTime),
+            });
+        return Results.File(Xlsx.Gerar("Desconexões", colunas, linhas), Xlsx.ContentType,
+            $"desconexoes-{Horario.Agora:yyyyMMdd-HHmm}.xlsx");
     })
     .RequireAuthorization(Permissoes.RelatoriosVer);
 
@@ -454,9 +519,11 @@ app.MapPost("/api/usuarios/editar", async (
         [FromForm] int id,
         [FromForm] string displayName,
         [FromForm] int perfilId,
-        [FromForm] string? novaSenha) =>
+        [FromForm] string? novaSenha,
+        [FromForm] string? exigirTroca) =>
     {
-        var resultado = await userService.EditarAsync(id, displayName, perfilId, novaSenha);
+        var resultado = await userService.EditarAsync(id, displayName, perfilId, novaSenha,
+            exigirTroca: exigirTroca == "true");
 
         return resultado switch
         {
@@ -501,10 +568,12 @@ if (comandoReset is not null)
 
     using var scopeReset = app.Services.CreateScope();
     var userServiceReset = scopeReset.ServiceProvider.GetRequiredService<IUserService>();
-    var ok = await userServiceReset.RedefinirSenhaAsync("admin", novaSenha);
+    // Com a senha padrão (pública), o admin precisa definir a dele no próximo acesso
+    var senhaPadrao = partes.Length < 2 || string.IsNullOrWhiteSpace(partes[1]);
+    var ok = await userServiceReset.RedefinirSenhaAsync("admin", novaSenha, exigirTroca: senhaPadrao);
 
     Console.WriteLine(ok
-        ? $"Senha do usuário 'admin' redefinida para: {novaSenha}"
+        ? $"Senha do usuário 'admin' redefinida para: {novaSenha}" + (senhaPadrao ? " (a troca será exigida no próximo login)" : "")
         : "Usuário 'admin' não encontrado no banco de dados.");
     return;
 }

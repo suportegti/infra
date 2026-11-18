@@ -93,7 +93,7 @@
                 }
                 @if (selecionado.AlteradoEm is { } alt)
                 {
-                    <p class="sub-label">Alterado em @alt.ToLocalTime().ToString("dd/MM/yyyy HH:mm") @(selecionado.AlteradoPor is null ? "" : $"por {selecionado.AlteradoPor}")</p>
+                    <p class="sub-label">Alterado em @Horario.Fmt(alt) @(selecionado.AlteradoPor is null ? "" : $"por {selecionado.AlteradoPor}")</p>
                 }
             </div>
 

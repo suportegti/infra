@@ -24,8 +24,16 @@
         <div class="summary-icon icon-green"><i class="fa-solid fa-desktop"></i></div>
         <div class="summary-body">
             <span class="summary-title">Sessões ativas</span>
-            <span class="summary-value">@servidores.Sum(s => s.Sessions.Count)</span>
-            <a class="summary-link" href="sessoes">Ver todas <i class="fa-solid fa-arrow-right"></i></a>
+            <span class="summary-value">@servidores.Sum(s => s.Sessions.Count(x => x.State != SessionState.Disconnected))</span>
+            <a class="summary-link" href="sessoes?estado=ativas">Ver ativas <i class="fa-solid fa-arrow-right"></i></a>
+        </div>
+    </div>
+    <div class="summary-card">
+        <div class="summary-icon icon-amber"><i class="fa-solid fa-plug-circle-xmark"></i></div>
+        <div class="summary-body">
+            <span class="summary-title">Sessões desconectadas</span>
+            <span class="summary-value">@servidores.Sum(s => s.Sessions.Count(x => x.State == SessionState.Disconnected))</span>
+            <a class="summary-link" href="sessoes?estado=desconectadas">Ver desconectadas <i class="fa-solid fa-arrow-right"></i></a>
         </div>
     </div>
     <div class="summary-card">
@@ -57,15 +65,21 @@
     @foreach (var servidor in servidores)
     {
         var isAlerta = servidor.IsOnline && servidor.CpuPercent > 80;
-        <a class="server-card @(isAlerta ? "is-alert" : "")" href="sessoes">
+        var desconectadas = servidor.Sessions.Count(x => x.State == SessionState.Disconnected);
+        <a class="server-card @(isAlerta ? "is-alert" : "")" href="@($"sessoes?servidor={servidor.Id}")"
+           title="Ver as sessões de @(servidor.DisplayName ?? servidor.Name)">
             <div class="server-card-top">
                 <span class="status-dot @(servidor.IsOnline ? (isAlerta ? "idle" : "active") : "disconnected")"></span>
                 <span class="server-name">@(servidor.DisplayName ?? servidor.Name)</span>
             </div>
+            @if (servidor.Cliente is not null)
+            {
+                <span class="server-label" style="font-size:.72rem;"><i class="fa-solid fa-building"></i> @servidor.Cliente</span>
+            }
             @if (servidor.IsOnline)
             {
                 <span class="server-count">@servidor.Sessions.Count</span>
-                <span class="server-label">usuários conectados</span>
+                <span class="server-label">sessões@(desconectadas > 0 ? $" ({desconectadas} desconectada{(desconectadas > 1 ? "s" : "")})" : "")</span>
                 <span class="server-label" style="font-size:.75rem;margin-top:.25rem;">
                     CPU @servidor.CpuPercent.ToString("0.#")% · RAM @servidor.MemoryUsedGb.ToString("0.##") GB
                 </span>

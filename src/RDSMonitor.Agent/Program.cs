@@ -65,6 +65,7 @@ builder.Services.AddSingleton(_ =>
 
 // ── Serviços do agente ────────────────────────────────────────────────────────
 builder.Services.AddSingleton<SessionCollector>();
+builder.Services.AddSingleton<SessionEventCollector>();
 builder.Services.AddSingleton<ProcessCollector>();
 builder.Services.AddSingleton<ApiClient>();
 builder.Services.AddSingleton<CommandExecutor>();

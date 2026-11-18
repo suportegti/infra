@@ -53,15 +53,25 @@ else
                         }
                     </select>
                 </label>
-                <label class="field">
+                <label class="field field-senha">
                     <i class="fa-solid fa-key"></i>
                     <input name="novaSenha" type="password" placeholder="Nova senha (deixe em branco para não alterar)" minlength="8" />
+                    <button type="button" class="olho-senha" tabindex="-1" aria-label="Mostrar senha (mantenha pressionado)" title="Mantenha pressionado para ver a senha"><i class="fa-solid fa-eye"></i></button>
                 </label>
             </div>
+
+            <label class="toolbar-check" style="margin-top:.75rem;">
+                <input type="checkbox" name="exigirTroca" value="true" checked="@Usuario.TrocarSenhaNoProximoLogin" />
+                Exigir troca de senha no próximo login
+            </label>
+            <p class="dash-note" style="margin-top:.35rem;">
+                Ao redefinir a senha de alguém, deixe marcado: a pessoa entra com a senha que você informou e é obrigada a criar a dela.
+            </p>
 
             <div class="form-actions">
                 <button type="submit" class="btn-pill primary"><i class="fa-solid fa-check"></i> Salvar alterações</button>
                 <a class="btn-pill" href="usuarios">Cancelar</a>
+                <a class="btn-pill" href="@($"usuarios/{Usuario.Id}/acessos")"><i class="fa-solid fa-clock-rotate-left"></i> Histórico de acessos</a>
             </div>
         </form>
     </div>

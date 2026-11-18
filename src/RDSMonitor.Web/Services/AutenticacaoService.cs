@@ -6,7 +6,7 @@ using RDSMonitor.Web.Models;
 
 namespace RDSMonitor.Web.Services;
 
-public enum AuthStatus { Sucesso, CredenciaisInvalidas, Bloqueado }
+public enum AuthStatus { Sucesso, CredenciaisInvalidas, Bloqueado, TrocaDeSenhaExigida }
 
 /// <summary>Resultado de uma tentativa de login.</summary>
 /// <param name="Usuario">Preenchido só em caso de sucesso.</param>
@@ -23,6 +23,8 @@ public interface IAutenticacaoService
 
     /// <summary>Registra uma tentativa recusada pelo limite de requisições por IP.</summary>
     Task RegistrarLimiteDeTaxaAsync(string? username, string? ip);
+    /// <summary>Registra a saída do usuário (botão Sair) no histórico de acessos.</summary>
+    Task RegistrarLogoutAsync(string username, string? ip);
 }
 
 public class AutenticacaoService : IAutenticacaoService
@@ -73,6 +75,16 @@ public class AutenticacaoService : IAutenticacaoService
         var ok = _hasher.VerifyHashedPassword(user, user.PasswordHash, password ?? string.Empty)
                  != PasswordVerificationResult.Failed;
 
+        if (ok && user.TrocarSenhaNoProximoLogin)
+        {
+            // Senha certa, mas o usuário precisa definir a dele antes de entrar
+            user.AccessFailedCount = 0;
+            user.LockoutEnd        = null;
+            await RegistrarAsync(username, ip, AcessoResultado.TrocaDeSenhaExigida, salvar: false);
+            await _db.SaveChangesAsync();
+            return new(user, AuthStatus.TrocaDeSenhaExigida);
+        }
+
         if (ok)
         {
             user.AccessFailedCount = 0;
@@ -112,6 +124,9 @@ public class AutenticacaoService : IAutenticacaoService
 
     public Task RegistrarLimiteDeTaxaAsync(string? username, string? ip) =>
         RegistrarAsync(username ?? string.Empty, ip, AcessoResultado.LimiteDeTaxa);
+
+    public Task RegistrarLogoutAsync(string username, string? ip) =>
+        RegistrarAsync(username, ip, AcessoResultado.Logout);
 
     private async Task RegistrarAsync(string usuario, string? ip, AcessoResultado resultado, string? detalhe = null, bool salvar = true)
     {

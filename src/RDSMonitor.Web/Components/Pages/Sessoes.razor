@@ -44,13 +44,11 @@
 </div>
 
 <div class="toolbar">
-    @if (podeVerProcessos)
-    {
     <div class="toolbar-search process-search">
         <i class="fa-solid fa-magnifying-glass"></i>
         <input type="text"
-               placeholder="Pesquisar processo, PID ou usuário (ex: chrome, 4532, joao)"
-               aria-label="Pesquisar processo"
+               placeholder="@(PesquisaEmProcessos ? "Pesquisar usuário, máquina, IP, processo ou PID (ex: joao, chrome, 4532)" : "Pesquisar usuário, máquina ou IP (ex: joao, NB-FIN01, 10.0.1.20)")"
+               aria-label="Pesquisar sessões"
                value="@busca"
                @oninput="AoDigitarAsync" />
         @if (BuscaAtiva)
@@ -60,19 +58,42 @@
             </button>
         }
     </div>
-    }
-    <div class="toolbar-search" style="flex:0 1 220px;min-width:180px;">
+    <div class="toolbar-search" style="flex:0 1 200px;min-width:170px;">
         <i class="fa-solid fa-hard-drive"></i>
         <select @bind="servidorSelecionadoId" @bind:after="AtualizarAsync" class="toolbar-select" aria-label="Filtrar por servidor">
             <option value="0">Todos os servidores</option>
-            @foreach (var sv in servidores)
+            @foreach (var sv in servidores.Where(s => string.IsNullOrEmpty(clienteSelecionado) || s.Cliente == clienteSelecionado))
             {
                 <option value="@sv.Id">@(sv.DisplayName ?? sv.Name)</option>
             }
         </select>
     </div>
+    @if (clientes.Count > 0)
+    {
+    <div class="toolbar-search" style="flex:0 1 190px;min-width:160px;">
+        <i class="fa-solid fa-building"></i>
+        <select @bind="clienteSelecionado" @bind:after="AoTrocarClienteAsync" class="toolbar-select" aria-label="Filtrar por cliente">
+            <option value="">Todos os clientes</option>
+            @foreach (var c in clientes)
+            {
+                <option value="@c">@c</option>
+            }
+        </select>
+    </div>
+    }
+    <div class="toolbar-search" style="flex:0 1 180px;min-width:150px;">
+        <i class="fa-solid fa-plug"></i>
+        <select @bind="estadoSelecionado" class="toolbar-select" aria-label="Filtrar por estado da conexão">
+            <option value="">Todas as conexões</option>
+            <option value="ativas">Ativas</option>
+            <option value="desconectadas">Desconectadas</option>
+        </select>
+    </div>
     @if (podeVerProcessos)
     {
+    <label class="toolbar-check" title="Na pesquisa, procura também nos processos e já abre a lista de processos de cada sessão encontrada.">
+        <input type="checkbox" @bind="mostrarProcessos" @bind:after="AoMudarMostrarProcessosAsync" /> Mostrar processos
+    </label>
     <label class="toolbar-check" title="Processos do Windows (csrss, dwm, svchost...) e de contas de sistema. Não podem ser derrubados.">
         <input type="checkbox" @bind="mostrarSistema" /> Processos do sistema
     </label>
@@ -92,30 +113,46 @@
 }
 
 @{
-    var sessoes = servidores
-        .Where(s => servidorSelecionadoId == 0 || s.Id == servidorSelecionadoId)
+    var sessoes = ServidoresFiltrados()
         .SelectMany(s => s.Sessions.OrderBy(x => x.Username).Select(sess => (sv: s, sess)))
+        .Where(x => estadoSelecionado switch
+        {
+            "ativas"        => x.sess.State != SessionState.Disconnected,
+            "desconectadas" => x.sess.State == SessionState.Disconnected,
+            _               => true,
+        })
         .ToList();
 
-    // Na pesquisa, só ficam as sessões com algum processo correspondente.
+    // Pesquisa: usuário, máquina, IP ou servidor; com "Mostrar processos", também processo/PID.
     if (BuscaAtiva)
-        sessoes = sessoes.Where(x => ProcessosVisiveis(x.sv.Id, x.sess.RdsSessionId).Count > 0).ToList();
+        sessoes = sessoes.Where(x => SessaoCasa(x.sv, x.sess)
+                                  || (PesquisaEmProcessos && ProcessosVisiveis(x.sv.Id, x.sess.RdsSessionId, filtrarPelaBusca: true).Count > 0)).ToList();
 
-    var colunas = PodeAgirNaSessao ? 10 : 9;
+    var colunas = PodeAgirNaSessao ? 11 : 10;
 }
 
 @if (BuscaAtiva)
 {
-    var totalAchados = sessoes.Sum(x => ProcessosVisiveis(x.sv.Id, x.sess.RdsSessionId).Count);
     <p class="search-summary" role="status">
-        @if (totalAchados == 0)
+        @if (sessoes.Count == 0)
         {
-            <span>Nenhum processo encontrado para <strong>"@busca"</strong>@(mostrarSistema ? "" : " (processos do sistema ocultos)").</span>
+            <span>Nenhuma sessão encontrada para <strong>"@busca"</strong>@(PesquisaEmProcessos && !mostrarSistema ? " (processos do sistema ocultos)" : "").</span>
+        }
+        else if (PesquisaEmProcessos)
+        {
+            var totalProcs = sessoes.Sum(x => ProcessosDaLinha(x.sv, x.sess).Count);
+            <span><strong>@sessoes.Count</strong> sessão(ões) e <strong>@totalProcs</strong> processo(s) para <strong>"@busca"</strong>.</span>
         }
         else
         {
-            <span><strong>@totalAchados</strong> processo(s) encontrados para <strong>"@busca"</strong> em <strong>@sessoes.Count</strong> sessão(ões).</span>
+            <span><strong>@sessoes.Count</strong> sessão(ões) para <strong>"@busca"</strong>@(podeVerProcessos ? " — clique na seta para ver os processos" : "").</span>
         }
+    </p>
+}
+else if (sessoes.Count > 0)
+{
+    <p class="search-summary" role="status">
+        <span><strong>@sessoes.Count</strong> sessão(ões): @sessoes.Count(x => x.sess.State != SessionState.Disconnected) ativa(s), @sessoes.Count(x => x.sess.State == SessionState.Disconnected) desconectada(s).</span>
     </p>
 }
 
@@ -124,7 +161,7 @@
     @if (!BuscaAtiva)
     {
         <p class="dash-note">
-            Nenhuma sessão ativa no momento.
+            @(estadoSelecionado == "desconectadas" ? "Nenhuma sessão desconectada no momento." : "Nenhuma sessão no momento.")
             @if (!servidores.Any(s => s.IsOnline))
             {
                 <span>Instale o agente nos servidores para ver dados em tempo real.</span>
@@ -141,6 +178,7 @@ else
                 <th>Servidor</th>
                 <th>Usuário</th>
                 <th>Sessão</th>
+                <th>Origem</th>
                 <th>Estado</th>
                 <th>CPU</th>
                 <th>Memória</th>
@@ -153,10 +191,10 @@ else
             @foreach (var (sv, sess) in sessoes)
             {
                 var chave     = (sv.Id, sess.RdsSessionId);
-                var expandida = BuscaAtiva || expandidas.Contains(chave);
+                var expandida = ExpandeAutomatico || expandidas.Contains(chave);
                 <tr class="@(expandida ? "row-expanded" : "")">
                     <td>
-                        @if (!BuscaAtiva && podeVerProcessos)
+                        @if (!ExpandeAutomatico && podeVerProcessos)
                         {
                             <button class="btn-expand" @onclick="() => AlternarProcessosAsync(sv.Id, sess.RdsSessionId)"
                                     title="@(expandida ? "Ocultar processos" : "Ver processos")"
@@ -165,9 +203,15 @@ else
                             </button>
                         }
                     </td>
-                    <td class="mono">@sv.Name</td>
+                    <td class="mono">
+                        @sv.Name
+                        @if (sv.Cliente is not null)
+                        {
+                            <span class="sub-label">@sv.Cliente</span>
+                        }
+                    </td>
                     <td>
-                        @sess.Username
+                        @Realcar(sess.Username)
                         @if (EhSimulada(sess))
                         {
                             <span class="badge-sim" title="Sessão fictícia gerada pelo modo de simulação do agente">simulada</span>
@@ -181,12 +225,26 @@ else
                         }
                     </td>
                     <td>
+                        @if (sess.ClientName is null && sess.ClientIp is null)
+                        {
+                            <span class="sub-label">—</span>
+                        }
+                        else
+                        {
+                            <span class="mono">@Realcar(sess.ClientName ?? "")</span>
+                            @if (sess.ClientIp is not null)
+                            {
+                                <span class="sub-label mono">@Realcar(sess.ClientIp)</span>
+                            }
+                        }
+                    </td>
+                    <td>
                         <span class="status-dot @sess.State.ToString().ToLower()"></span>
                         @NomeEstado(sess.State)
                     </td>
                     <td class="mono">@sess.CpuPercent.ToString("0.#")%</td>
                     <td class="mono">@FormatarMemoria(sess.MemoryMb)</td>
-                    <td class="mono">@sess.LogonTime.ToLocalTime().ToString("dd/MM HH:mm")</td>
+                    <td class="mono">@Horario.Fmt(sess.LogonTime, "dd/MM HH:mm")</td>
                     <td class="mono">@(sess.IdleTimeMinutes == 0 ? "—" : FormatarOciosidade(sess.IdleTimeMinutes))</td>
                     @if (PodeAgirNaSessao)
                     {
@@ -221,8 +279,9 @@ else
                 @if (expandida && podeVerProcessos)
                 {
                     var todos    = processos.TryGetValue(chave, out var lista) ? lista : new List<ServerProcess>();
-                    var visiveis = ProcessosVisiveis(sv.Id, sess.RdsSessionId);
-                    var ocultos  = BuscaAtiva ? 0 : todos.Count - visiveis.Count;
+                    var visiveis = ProcessosDaLinha(sv, sess);
+                    var filtrouPorBusca = ExpandeAutomatico && !SessaoCasa(sv, sess);
+                    var ocultos  = filtrouPorBusca ? 0 : todos.Count - visiveis.Count;
                     <tr class="row-detail">
                         <td colspan="@colunas">
                             @if (todos.Count == 0)
@@ -306,9 +365,18 @@ else
 
     private ConfirmDialog confirmacao = null!;
 
+    [SupplyParameterFromQuery(Name = "servidor")] private int?    ServidorQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "estado")]   private string? EstadoQuery   { get; set; }
+    [SupplyParameterFromQuery(Name = "cliente")]  private string? ClienteQuery  { get; set; }
+
     private List<Server> servidores = new();
+    private List<string> clientes   = new();
     private int     servidorSelecionadoId;
+    private string  clienteSelecionado = string.Empty;
+    private string  estadoSelecionado  = string.Empty;
     private bool    mostrarSistema;
+    private bool    mostrarProcessos;
+    private (int?, string?, string?) filtrosDaUrl;
     private System.Security.Claims.ClaimsPrincipal usuario = new();
 
     // Permissões do usuário (reavaliadas a cada atualização da tela)
@@ -325,6 +393,12 @@ else
     private string busca = string.Empty;
     private bool   BuscaAtiva => !string.IsNullOrWhiteSpace(busca);
 
+    /// <summary>Pesquisa também nos processos (flag "Mostrar processos").</summary>
+    private bool PesquisaEmProcessos => podeVerProcessos && mostrarProcessos;
+
+    /// <summary>Com "Mostrar processos" marcado, a pesquisa já abre os processos das sessões encontradas.</summary>
+    private bool ExpandeAutomatico => BuscaAtiva && PesquisaEmProcessos;
+
     // Sessões com a lista de processos aberta, e processos carregados por (servidor, sessão).
     // Durante a pesquisa são carregados os processos de todas as sessões.
     private readonly HashSet<(int ServerId, int SessionId)> expandidas = new();
@@ -338,6 +412,7 @@ else
     protected override async Task OnInitializedAsync()
     {
         usuario = (await AuthState).User;
+        AplicarFiltrosDaUrl();
 
         await AtualizarAsync();
 
@@ -348,6 +423,42 @@ else
             StateHasChanged();
         });
         _timer.Start();
+    }
+
+    /// <summary>
+    /// Filtros vindos da URL (ex.: clique num servidor do Dashboard →
+    /// /sessoes?servidor=3). Reaplicados se a URL mudar com a tela aberta.
+    /// </summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        if (filtrosDaUrl == (ServidorQuery, EstadoQuery, ClienteQuery)) return;
+        AplicarFiltrosDaUrl();
+        if (servidores.Count > 0) await AtualizarAsync();
+    }
+
+    private void AplicarFiltrosDaUrl()
+    {
+        filtrosDaUrl          = (ServidorQuery, EstadoQuery, ClienteQuery);
+        servidorSelecionadoId = ServidorQuery ?? 0;
+        estadoSelecionado     = EstadoQuery is "ativas" or "desconectadas" ? EstadoQuery : string.Empty;
+        clienteSelecionado    = ClienteQuery ?? string.Empty;
+    }
+
+    private IEnumerable<Server> ServidoresFiltrados() => servidores
+        .Where(s => servidorSelecionadoId == 0 || s.Id == servidorSelecionadoId)
+        .Where(s => string.IsNullOrEmpty(clienteSelecionado) || s.Cliente == clienteSelecionado);
+
+    private async Task AoTrocarClienteAsync()
+    {
+        // O servidor escolhido pode não ser do novo cliente
+        if (servidorSelecionadoId != 0 && !ServidoresFiltrados().Any()) servidorSelecionadoId = 0;
+        await CarregarProcessosAsync();
+    }
+
+    private async Task AoMudarMostrarProcessosAsync()
+    {
+        if (!mostrarProcessos) expandidas.Clear();
+        await CarregarProcessosAsync();
     }
 
     /// <summary>
@@ -378,13 +489,15 @@ else
         podeDesconectar  = p.Contains(Permissoes.SessoesDesconectar);
         podeLogoff       = p.Contains(Permissoes.SessoesLogoff);
         podeDerrubar     = p.Contains(Permissoes.ProcessosDerrubar) && podeVerProcessos;
-        if (!podeVerProcessos) { busca = string.Empty; expandidas.Clear(); }
+        if (!podeVerProcessos) { mostrarProcessos = false; expandidas.Clear(); }
     }
 
     private async Task AtualizarAsync()
     {
         await CarregarPermissoesAsync();
         servidores = await ServerService.GetAllWithSessionsAsync();
+        clientes   = servidores.Where(s => s.Cliente is not null).Select(s => s.Cliente!)
+                               .Distinct().OrderBy(c => c, StringComparer.CurrentCultureIgnoreCase).ToList();
 
         // Esquece sessões que encerraram
         expandidas.RemoveWhere(k => !servidores.Any(s => s.Id == k.ServerId && s.Sessions.Any(x => x.RdsSessionId == k.SessionId)));
@@ -397,10 +510,10 @@ else
     {
         var novos = new Dictionary<(int, int), List<ServerProcess>>();
 
-        if (BuscaAtiva)
+        if (ExpandeAutomatico)
         {
-            // Pesquisa: todos os processos dos servidores visíveis, agrupados por sessão
-            foreach (var sv in servidores.Where(s => servidorSelecionadoId == 0 || s.Id == servidorSelecionadoId))
+            // Pesquisa em processos: todos os processos dos servidores visíveis, agrupados por sessão
+            foreach (var sv in ServidoresFiltrados())
                 foreach (var g in (await ServerService.GetProcessesAsync(sv.Id)).GroupBy(p => p.RdsSessionId))
                     novos[(sv.Id, g.Key)] = g.ToList();
         }
@@ -413,18 +526,37 @@ else
         processos = novos;
     }
 
+    /// <summary>A sessão casa com a pesquisa pelos dados dela (usuário, máquina, IP ou servidor).</summary>
+    private bool SessaoCasa(Server sv, Session sess)
+    {
+        if (!BuscaAtiva) return true;
+        var t = busca.Trim();
+        return sess.Username.Contains(t, StringComparison.OrdinalIgnoreCase)
+            || (sess.ClientName?.Contains(t, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (sess.ClientIp?.Contains(t, StringComparison.OrdinalIgnoreCase) ?? false)
+            || sv.Name.Contains(t, StringComparison.OrdinalIgnoreCase)
+            || (sv.DisplayName?.Contains(t, StringComparison.OrdinalIgnoreCase) ?? false);
+    }
+
     /// <summary>
-    /// Processos exibidos de uma sessão. Na pesquisa, os que casam com o termo
-    /// (nome, PID ou dono); fora dela, todos — exceto os do sistema, se ocultos.
+    /// Processos exibidos na linha aberta: se a sessão foi encontrada pelos
+    /// dados dela, todos; se foi encontrada por um processo, só os que casam.
     /// </summary>
-    private List<ServerProcess> ProcessosVisiveis(int serverId, int sessionId)
+    private List<ServerProcess> ProcessosDaLinha(Server sv, Session sess)
+        => ProcessosVisiveis(sv.Id, sess.RdsSessionId, filtrarPelaBusca: ExpandeAutomatico && !SessaoCasa(sv, sess));
+
+    /// <summary>
+    /// Processos de uma sessão, sem os do sistema se ocultos; com
+    /// <paramref name="filtrarPelaBusca"/>, só os que casam com o termo (nome, PID ou dono).
+    /// </summary>
+    private List<ServerProcess> ProcessosVisiveis(int serverId, int sessionId, bool filtrarPelaBusca)
     {
         if (!processos.TryGetValue((serverId, sessionId), out var lista)) return new();
 
         IEnumerable<ServerProcess> q = lista;
         if (!mostrarSistema) q = q.Where(p => !p.IsProtected);
 
-        if (BuscaAtiva)
+        if (filtrarPelaBusca && BuscaAtiva)
         {
             var termo = busca.Trim();
             q = q.Where(p => p.Name.Contains(termo, StringComparison.OrdinalIgnoreCase)
@@ -437,12 +569,12 @@ else
 
     private async Task AoDigitarAsync(ChangeEventArgs e)
     {
-        var estavaAtiva = BuscaAtiva;
+        var estavaAtiva = ExpandeAutomatico;
         busca = e.Value?.ToString() ?? string.Empty;
 
-        // Ao entrar ou sair do modo pesquisa recarrega do banco; enquanto
-        // digita, o filtro é só em memória (ProcessosVisiveis).
-        if (estavaAtiva != BuscaAtiva)
+        // Ao entrar ou sair da pesquisa em processos recarrega do banco; enquanto
+        // digita, o filtro é só em memória (SessaoCasa / ProcessosVisiveis).
+        if (estavaAtiva != ExpandeAutomatico)
             await CarregarProcessosAsync();
     }
 
