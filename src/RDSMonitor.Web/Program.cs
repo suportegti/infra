@@ -67,6 +67,14 @@ builder.Services.AddScoped<IPerfilService,  PerfilService>();
 builder.Services.AddScoped<IAuditoriaService, AuditoriaService>();
 builder.Services.AddScoped<IRelatorioService, RelatorioService>();
 builder.Services.AddScoped<IAutenticacaoService, AutenticacaoService>();
+builder.Services.AddScoped<IAtualizacaoAgenteService, AtualizacaoAgenteService>();
+
+// Pacotes do agente para a atualização automática: ao lado do banco (data\pacotes-agente),
+// que o instalador do portal preserva nas atualizações.
+builder.Services.AddSingleton(new PastaPacotesAgente(Path.Combine(
+    Path.GetDirectoryName(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(connectionString).DataSource)
+        ?? builder.Environment.ContentRootPath,
+    "pacotes-agente")));
 
 // Quem está usando o portal agora (tela Usuários do sistema)
 builder.Services.AddSingleton<PresencaService>();
@@ -447,21 +455,34 @@ var agentApi = app.MapGroup("/api/agent")
 // O agente envia o estado completo do servidor a cada ciclo.
 agentApi.MapPost("/heartbeat", async (
         AgentHeartbeatDto dto,
-        IServerService serverService) =>
+        IServerService serverService,
+        IAtualizacaoAgenteService atualizacao) =>
     {
         if (string.IsNullOrWhiteSpace(dto.ServerName))
             return Results.BadRequest("ServerName é obrigatório.");
 
         // Só aceita servidores cadastrados e habilitados na tela Servidores.
+        // A resposta leva a instrução de atualização quando o portal pediu uma.
         return await serverService.ProcessHeartbeatAsync(dto) switch
         {
-            HeartbeatResult.Aceito        => Results.Ok(new { received = DateTime.UtcNow }),
+            HeartbeatResult.Aceito        => Results.Ok(new
+            {
+                received = DateTime.UtcNow,
+                update   = await atualizacao.InstrucaoParaAsync(dto.ServerName),
+            }),
             HeartbeatResult.NaoCadastrado => Results.Problem(
                 $"Servidor \"{dto.ServerName}\" não está cadastrado no portal.", statusCode: 403),
             _                             => Results.Problem(
                 $"Servidor \"{dto.ServerName}\" está desabilitado no portal.", statusCode: 403),
         };
     });
+
+// GET /api/agent/pacote/{versao}
+// O agente baixa o pacote da versão nova (atualização automática).
+agentApi.MapGet("/pacote/{versao}", async (string versao, IAtualizacaoAgenteService atualizacao) =>
+    await atualizacao.ArquivoDoPacoteAsync(versao) is { } arquivo
+        ? Results.File(arquivo.Caminho, "application/zip", arquivo.Nome)
+        : Results.NotFound());
 
 // GET /api/agent/ping/{serverName}
 // Teste de conexão usado pelo instalador do agente: confirma que a URL e a

@@ -57,20 +57,20 @@ o IP do servidor do portal antes de instalar os agentes.
 Na raiz do repositório:
 
 ```powershell
-.\deploy\build-pacotes.ps1 -Versao 1.6.0
+.\deploy\build-pacotes.ps1 -Versao 1.7.0
 ```
 
 Resultado em `dist\`:
 
 | Pacote | Conteúdo |
 |---|---|
-| `RDSMonitor.Web-1.6.0.zip` | `app\`, `install-web.ps1`, `uninstall-web.ps1`, este guia |
-| `RDSMonitor.Agent-1.6.0.zip` | `app\`, `install-agent.ps1`, `uninstall-agent.ps1`, este guia |
+| `RDSMonitor.Web-1.7.0.zip` | `app\`, `install-web.ps1`, `uninstall-web.ps1`, este guia |
+| `RDSMonitor.Agent-1.7.0.zip` | `app\`, `install-agent.ps1`, `uninstall-agent.ps1`, este guia |
 
 Copie cada `.zip` para o servidor de destino (compartilhamento, RDP, etc.).
 
 > **Antes de extrair**, desbloqueie o arquivo, senão o Windows marca os scripts como
-> baixados da internet: `Unblock-File .\RDSMonitor.Web-1.6.0.zip`
+> baixados da internet: `Unblock-File .\RDSMonitor.Web-1.7.0.zip`
 
 ---
 
@@ -79,8 +79,8 @@ Copie cada `.zip` para o servidor de destino (compartilhamento, RDP, etc.).
 No servidor escolhido para o portal, **PowerShell como Administrador**:
 
 ```powershell
-Unblock-File .\RDSMonitor.Web-1.6.0.zip
-Expand-Archive .\RDSMonitor.Web-1.6.0.zip -DestinationPath C:\Temp\RDSMonitor.Web
+Unblock-File .\RDSMonitor.Web-1.7.0.zip
+Expand-Archive .\RDSMonitor.Web-1.7.0.zip -DestinationPath C:\Temp\RDSMonitor.Web
 cd C:\Temp\RDSMonitor.Web
 powershell -ExecutionPolicy Bypass -File .\install-web.ps1 -SenhaAdmin "Defina#UmaSenha1"
 ```
@@ -191,8 +191,8 @@ O registro fica guardado mesmo que o servidor seja excluído depois.
 **PowerShell como Administrador** no servidor RDS:
 
 ```powershell
-Unblock-File .\RDSMonitor.Agent-1.6.0.zip
-Expand-Archive .\RDSMonitor.Agent-1.6.0.zip -DestinationPath C:\Temp\RDSMonitor.Agent
+Unblock-File .\RDSMonitor.Agent-1.7.0.zip
+Expand-Archive .\RDSMonitor.Agent-1.7.0.zip -DestinationPath C:\Temp\RDSMonitor.Agent
 cd C:\Temp\RDSMonitor.Agent
 powershell -ExecutionPolicy Bypass -File .\install-agent.ps1 -ServidorWeb 10.0.0.20 -ApiKey "<chave mostrada pelo portal>"
 ```
@@ -270,18 +270,49 @@ O serviço `RDSMonitor.Agent` fica com:
 
 ## 7. Atualizar uma versão
 
-Gere os pacotes novos e rode **o mesmo instalador** de novo. Ele para o serviço,
-troca os arquivos e o religa.
+### Portal
 
-- **Portal**: o banco (`data\`), a chave da API e a porta são **preservados**.
-  Não é preciso informar parâmetros, exceto se quiser mudá-los. Tabelas e colunas
-  novas (ex.: perfis e auditoria da 1.3) são criadas automaticamente na primeira
-  execução, sem apagar dados; os usuários existentes recebem o perfil equivalente.
-- **Agente**: informe de novo `-ServidorWeb` e `-ApiKey`, porque a configuração é
-  regravada.
-- **Portal e agente de versões diferentes** funcionam juntos: um agente 1.4 com o
-  portal 1.5 só não envia origem (máquina/IP) nem desconexões; atualize os agentes
-  para ter esses dados.
+Gere os pacotes novos e rode **o mesmo instalador** de novo no servidor do portal.
+Ele para o serviço, troca os arquivos e o religa. O banco (`data\`), os pacotes
+do agente enviados ao portal (`data\pacotes-agente\`), a chave da API e a porta
+são **preservados**. Tabelas e colunas novas são criadas automaticamente na
+primeira execução, sem apagar dados. Faça backup de `data\` antes.
+
+### Agentes — pelo próprio portal (1.7.0 ou mais novo)
+
+Não é mais preciso copiar o pacote para cada servidor:
+
+1. Em **Administração > Atualização de agentes**, clique em **Enviar pacote** e
+   escolha o `RDSMonitor.Agent-x.y.z.zip`. O portal confere o conteúdo, lê a
+   versão do executável e calcula o SHA-256.
+2. Na lista de servidores aparece a versão do agente de cada um. Clique em
+   **Atualizar para x.y.z** num servidor, confira, e depois use **Atualizar todos
+   os desatualizados**.
+3. Em até 30 s (próximo heartbeat) o agente baixa o pacote do portal, confere o
+   SHA-256 e a versão, para o serviço, faz backup, **espelha** a versão nova na
+   pasta (mantendo o `appsettings.json`) e religa o serviço. A troca leva poucos
+   segundos; as sessões dos usuários não são afetadas.
+4. Se a versão nova não responder em **3 minutos**, o agente **volta sozinho**
+   para a versão anterior e a tela mostra *Falhou* com o motivo. O portal não
+   tenta de novo por conta própria.
+5. Cada pedido fica na **Auditoria** (ação *Atualizar agente*), com quem pediu,
+   de qual para qual versão e o resultado.
+
+Detalhes no servidor RDS: `C:\RDSMonitor\Agent\_atualizacao\atualizacao.log`
+(passo a passo) e `backup-*` (a instalação anterior; o último fica guardado).
+Servidor offline recebe a atualização quando voltar a enviar heartbeat. A
+permissão **Atualizar agentes** (grupo Servidores, em Perfis de usuários)
+controla quem pode enviar pacotes e disparar atualizações.
+
+> **Agentes anteriores à 1.7.0** não sabem se atualizar sozinhos (aparecem como
+> "anterior à 1.7"). Atualize-os **uma última vez** pelo instalador (seção 5,
+> informando de novo `-ServidorWeb` e `-ApiKey`); daí em diante, pelo portal.
+
+### Versões diferentes
+
+Portal e agente de versões diferentes funcionam juntos: um agente mais antigo
+só deixa de enviar os dados que surgiram depois (origem, eventos do Windows,
+versão). Atualize os agentes para ter tudo.
 
 ## 8. Desinstalar
 

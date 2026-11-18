@@ -1610,3 +1610,8 @@ mark.hl {
 .relatorio-eventos td.evento-status { white-space: nowrap; }
 .relatorio-eventos tr.row-secundaria td { color: var(--text-muted); font-size: 0.8rem; }
 .relatorio-eventos tr.row-secundaria strong { font-weight: 500; }
+
+/* Atualização de agentes: botão de envio do pacote (InputFile escondido dentro do botão) */
+.upload-pacote { position: relative; overflow: hidden; cursor: pointer; }
+.upload-pacote input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.upload-pacote.disabled { opacity: .7; pointer-events: none; }

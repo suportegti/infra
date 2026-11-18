@@ -23,6 +23,20 @@ public class AgentHeartbeatDto
 
     /// <summary>Desconexões/reconexões do log do Windows (agente 1.5.0 ou mais novo).</summary>
     public List<SessionEventDto> Events { get; set; } = new();
+
+    /// <summary>Versão do agente (1.7.0 ou mais novo).</summary>
+    public string? AgentVersion { get; set; }
+
+    /// <summary>Resultado da última atualização automática, enviado uma vez.</summary>
+    public AtualizacaoResultadoDto? UpdateResult { get; set; }
+}
+
+public class AtualizacaoResultadoDto
+{
+    public string Versao { get; set; } = string.Empty;
+    public bool Sucesso { get; set; }
+    public string? Mensagem { get; set; }
+    public DateTime Em { get; set; }
 }
 
 public class SessionEventDto

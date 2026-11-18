@@ -1,0 +1,313 @@
+@page "/atualizacao-agentes"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = Permissoes.AgentesAtualizar)]
+@inject IAtualizacaoAgenteService Atualizacao
+@inject IServerService ServerService
+@implements IDisposable
+
+<PageTitle>Atualização de agentes · RDSManager</PageTitle>
+
+<ConfirmDialog @ref="confirmacao" />
+
+<div class="dash-header">
+    <h1>Atualização de agentes</h1>
+    <p>Envie o pacote do agente uma vez e atualize os servidores daqui, sem copiar arquivos para cada um.</p>
+</div>
+
+@if (!string.IsNullOrEmpty(mensagem))
+{
+    <div class="login-alert @(erro ? "" : "login-alert-success")" role="alert">@mensagem</div>
+}
+
+<section class="form-panel">
+    <h2 class="relatorio-titulo"><i class="fa-solid fa-box-archive"></i> Pacotes do agente</h2>
+    <div class="form-actions" style="margin-top:0;">
+        <label class="btn-pill primary upload-pacote @(enviando ? "disabled" : "")">
+            @if (enviando)
+            {
+                <span><i class="fa-solid fa-spinner fa-spin"></i> Enviando e conferindo…</span>
+            }
+            else
+            {
+                <span><i class="fa-solid fa-upload"></i> Enviar pacote (.zip)</span>
+            }
+            <InputFile OnChange="EnviarAsync" accept=".zip" disabled="@enviando" />
+        </label>
+        <span class="sub-label">Use o <code>RDSMonitor.Agent-x.y.z.zip</code> gerado pelo <code>build-pacotes.ps1</code>. O portal confere o conteúdo e lê a versão do executável.</span>
+    </div>
+
+    @if (pacotes.Count == 0)
+    {
+        <p class="dash-note" style="margin:.75rem 0 0;">Nenhum pacote enviado ainda.</p>
+    }
+    else
+    {
+        <table class="data-table" style="margin-top:.75rem;">
+            <thead>
+                <tr>
+                    <th>Versão</th>
+                    <th>Arquivo</th>
+                    <th>Tamanho</th>
+                    <th>SHA-256</th>
+                    <th>Enviado</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var p in pacotes)
+                {
+                    <tr>
+                        <td class="mono">
+                            <strong>@Curta(p.Versao)</strong>
+                            @if (p == pacotes[0])
+                            {
+                                <span class="badge bg-success">mais recente</span>
+                            }
+                        </td>
+                        <td class="mono">@(p.NomeOriginal ?? p.NomeArquivo)</td>
+                        <td class="mono">@($"{p.TamanhoBytes / 1024d / 1024d:0.0} MB")</td>
+                        <td class="mono" title="@p.Sha256">@p.Sha256[..12]…</td>
+                        <td class="mono">@Horario.Fmt(p.EnviadoEm) <span class="sub-label">@p.EnviadoPor</span></td>
+                        <td class="acoes">
+                            <button class="btn-acao danger" @onclick="() => ExcluirPacoteAsync(p)">Excluir</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</section>
+
+<h2 class="relatorio-titulo" style="margin-top:1.5rem;"><i class="fa-solid fa-hard-drive"></i> Agentes dos servidores</h2>
+
+@if (pacotes.Count > 0)
+{
+    var desatualizados = Desatualizados().ToList();
+    <div class="toolbar">
+        <div class="toolbar-search" style="flex:0 1 220px;min-width:180px;">
+            <i class="fa-solid fa-code-branch"></i>
+            <select @bind="versaoAlvo" class="toolbar-select" aria-label="Versão para atualizar">
+                @foreach (var p in pacotes)
+                {
+                    <option value="@p.Versao">Versão @Curta(p.Versao)</option>
+                }
+            </select>
+        </div>
+        <button class="btn-pill primary" disabled="@(desatualizados.Count == 0)" @onclick="AtualizarTodosAsync">
+            <i class="fa-solid fa-cloud-arrow-down"></i> Atualizar todos os desatualizados (@desatualizados.Count)
+        </button>
+    </div>
+}
+
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>Servidor</th>
+            <th>Estado</th>
+            <th>Versão do agente</th>
+            <th>Atualização</th>
+            <th>Ações</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var s in servidores)
+        {
+            var naVersao = versaoAlvo is not null && s.AgentVersion == versaoAlvo;
+            <tr>
+                <td class="mono">
+                    <strong>@s.Name</strong>
+                    @if (s.Cliente is not null) { <span class="sub-label">(@s.Cliente)</span> }
+                </td>
+                <td>
+                    <span class="status-dot @(s.IsOnline ? "active" : "disconnected")"></span>
+                    @(s.IsOnline ? "Online" : "Offline")
+                </td>
+                <td class="mono">
+                    @if (s.AgentVersion is null)
+                    {
+                        <span class="sub-label" title="Agentes anteriores à 1.7.0 não informam a versão e não se atualizam sozinhos">anterior à 1.7 — atualizar pelo instalador</span>
+                    }
+                    else
+                    {
+                        <span>@Curta(s.AgentVersion)</span>
+                        @if (naVersao)
+                        {
+                            <span class="badge bg-success">atualizado</span>
+                        }
+                    }
+                </td>
+                <td>
+                    @if (s.VersaoAlvo is not null)
+                    {
+                        <span><i class="fa-solid fa-spinner fa-spin"></i> @s.AtualizacaoStatus → @Curta(s.VersaoAlvo)</span>
+                        @if (!s.IsOnline)
+                        {
+                            <span class="sub-label">começa quando o servidor voltar a ficar online</span>
+                        }
+                    }
+                    else if (s.AtualizacaoStatus is not null)
+                    {
+                        <span class="status-dot @(s.AtualizacaoStatus == SituacaoAtualizacao.Concluida ? "active" : s.AtualizacaoStatus == SituacaoAtualizacao.Cancelada ? "idle" : "disconnected")"></span>
+                        <span>@s.AtualizacaoStatus</span>
+                        <span class="sub-label">@Horario.Fmt(s.AtualizacaoEm, "dd/MM HH:mm") · @s.AtualizacaoMensagem</span>
+                    }
+                    else
+                    {
+                        <span class="sub-label">—</span>
+                    }
+                </td>
+                <td class="acoes">
+                    @if (s.VersaoAlvo is not null)
+                    {
+                        <button class="btn-acao" @onclick="() => CancelarAsync(s)">Cancelar</button>
+                    }
+                    else if (versaoAlvo is not null && s.AgentVersion is not null && !naVersao)
+                    {
+                        <button class="btn-acao" @onclick="() => AtualizarAsync(s)">
+                            <i class="fa-solid fa-cloud-arrow-down"></i> Atualizar para @Curta(versaoAlvo)
+                        </button>
+                    }
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+<p class="dash-note">
+    O agente baixa o pacote do portal, confere o SHA-256, troca os arquivos (mantendo o <code>appsettings.json</code>)
+    e religa o serviço. Se a versão nova não responder em 3 minutos, ele volta sozinho para a anterior.
+    Recomendado: atualize um servidor, confira, e depois os demais. Tudo fica registrado em Auditoria.
+</p>
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthState { get; set; } = null!;
+
+    private ConfirmDialog confirmacao = null!;
+    private System.Security.Claims.ClaimsPrincipal usuario = new();
+    private List<AgentePacote> pacotes = new();
+    private List<Server> servidores = new();
+    private string? versaoAlvo;
+    private string? mensagem;
+    private bool erro;
+    private bool enviando;
+    private System.Timers.Timer? _timer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        usuario = (await AuthState).User;
+        await CarregarAsync();
+        _timer = new System.Timers.Timer(5_000);
+        _timer.Elapsed += async (_, _) => await InvokeAsync(async () => { await CarregarAsync(); StateHasChanged(); });
+        _timer.Start();
+    }
+
+    private async Task CarregarAsync()
+    {
+        pacotes    = await Atualizacao.ListarPacotesAsync();
+        servidores = (await ServerService.GetAllWithSessionsAsync()).ToList();
+        if (versaoAlvo is null || pacotes.All(p => p.Versao != versaoAlvo))
+            versaoAlvo = pacotes.FirstOrDefault()?.Versao;
+    }
+
+    private IEnumerable<Server> Desatualizados() => servidores.Where(s =>
+        s.VersaoAlvo is null && s.AgentVersion is not null && versaoAlvo is not null
+        && Version.Parse(s.AgentVersion) < Version.Parse(versaoAlvo));
+
+    private async Task EnviarAsync(InputFileChangeEventArgs e)
+    {
+        enviando = true;
+        mensagem = null;
+        StateHasChanged();
+        try
+        {
+            await using var stream = e.File.OpenReadStream(maxAllowedSize: 300L * 1024 * 1024);
+            var (ok, texto) = await Atualizacao.EnviarPacoteAsync(stream, e.File.Name, usuario);
+            Avisar(ok ? $"Pacote da versão {Curta(texto)} recebido e conferido." : texto, !ok);
+            if (ok) versaoAlvo = null;
+            await CarregarAsync();
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            Avisar(ex.Message, true);
+        }
+        finally
+        {
+            enviando = false;
+        }
+    }
+
+    private async Task ExcluirPacoteAsync(AgentePacote p)
+    {
+        if (!await confirmacao.PerguntarAsync("Excluir pacote?", $"O pacote da versão {Curta(p.Versao)} será apagado do portal.",
+                "Excluir", perigo: true, detalhes: new[] { ("Versão", Curta(p.Versao)), ("Arquivo", p.NomeArquivo) }))
+            return;
+        await Executar(async () =>
+        {
+            var falha = await Atualizacao.ExcluirPacoteAsync(p.Id, usuario);
+            Avisar(falha ?? $"Pacote {Curta(p.Versao)} excluído.", falha is not null);
+        });
+    }
+
+    private async Task AtualizarAsync(Server s)
+    {
+        if (versaoAlvo is null) return;
+        if (!await confirmacao.PerguntarAsync("Atualizar o agente?",
+                "O serviço do agente será reiniciado no servidor (as sessões dos usuários não são afetadas). O monitoramento desse servidor fica parado por alguns segundos.",
+                "Atualizar", perigo: false,
+                detalhes: new[] { ("Servidor", s.Name), ("Versão atual", Curta(s.AgentVersion)), ("Nova versão", Curta(versaoAlvo)) }))
+            return;
+        await Executar(async () =>
+        {
+            await Atualizacao.SolicitarAsync(new[] { s.Id }, versaoAlvo, usuario);
+            Avisar($"Atualização de {s.Name} para {Curta(versaoAlvo)} solicitada. Ela começa no próximo heartbeat do agente (até 30 s).", false);
+        });
+    }
+
+    private async Task AtualizarTodosAsync()
+    {
+        var lista = Desatualizados().ToList();
+        if (versaoAlvo is null || lista.Count == 0) return;
+        if (!await confirmacao.PerguntarAsync($"Atualizar {lista.Count} agente(s)?",
+                "Cada servidor baixa o pacote e reinicia o serviço do agente. Dica: se ainda não testou esta versão, atualize um servidor primeiro.",
+                "Atualizar todos", perigo: true,
+                detalhes: new[] { ("Nova versão", Curta(versaoAlvo)), ("Servidores", string.Join(", ", lista.Select(s => s.Name))) }))
+            return;
+        await Executar(async () =>
+        {
+            var n = await Atualizacao.SolicitarAsync(lista.Select(s => s.Id), versaoAlvo, usuario);
+            Avisar($"Atualização para {Curta(versaoAlvo)} solicitada em {n} servidor(es).", false);
+        });
+    }
+
+    private async Task CancelarAsync(Server s)
+    {
+        await Executar(async () =>
+        {
+            await Atualizacao.CancelarAsync(s.Id, usuario);
+            Avisar($"Atualização de {s.Name} cancelada. Se o agente já estiver instalando, a troca continua.", false);
+        });
+    }
+
+    private async Task Executar(Func<Task> acao)
+    {
+        try { await acao(); }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            Avisar(ex.Message, true);
+        }
+        await CarregarAsync();
+    }
+
+    private void Avisar(string texto, bool falha)
+    {
+        mensagem = texto;
+        erro = falha;
+    }
+
+    /// <summary>"1.7.0.0" → "1.7.0".</summary>
+    private static string Curta(string? v) =>
+        v is null ? "—" : Version.TryParse(v, out var x) ? (x.Revision > 0 ? x.ToString() : x.ToString(3)) : v;
+
+    public void Dispose() => _timer?.Dispose();
+}

@@ -11,3 +11,7 @@ dist/
 
 # Gatilho de simulacao do agente (modo Development)
 simulacao.txt
+
+# Pacotes do agente enviados ao portal local (atualizacao automatica)
+pacotes-agente/
+_atualizacao/

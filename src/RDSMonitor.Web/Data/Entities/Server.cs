@@ -28,6 +28,26 @@ public class Server
     public double MemoryTotalGb { get; set; }
 
     public bool IsEnabled { get; set; } = true;
+
+    // ── Agente e atualização automática ──────────────────────
+    /// <summary>Versão informada pelo agente no heartbeat (ex.: "1.7.0.0"; vazio = agente antigo).</summary>
+    public string? AgentVersion { get; set; }
+
+    /// <summary>Versão para a qual o agente deve se atualizar (null = nada pendente).</summary>
+    public string? VersaoAlvo { get; set; }
+
+    /// <summary>Situação da última atualização (ver SituacaoAtualizacao) e detalhe.</summary>
+    public string? AtualizacaoStatus { get; set; }
+    public string? AtualizacaoMensagem { get; set; }
+
+    /// <summary>Última mudança na atualização (pedido, conclusão ou falha), UTC.</summary>
+    public DateTime? AtualizacaoEm { get; set; }
+
+    /// <summary>Quando a instrução foi entregue ao agente (conta o tempo limite), UTC.</summary>
+    public DateTime? AtualizacaoEnviadaEm { get; set; }
+
+    /// <summary>Registro de auditoria do pedido em andamento.</summary>
+    public long? AtualizacaoAuditoriaId { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public ICollection<Session> Sessions { get; set; } = new List<Session>();

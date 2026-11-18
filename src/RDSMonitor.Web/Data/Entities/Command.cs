@@ -36,6 +36,8 @@ public enum CommandType
     SendMessage,
     RestartService,
     RestartServer,
+    /// <summary>Atualização automática do agente (só auditoria — não vai para a fila de comandos).</summary>
+    AtualizarAgente,
 }
 
 public enum CommandStatus

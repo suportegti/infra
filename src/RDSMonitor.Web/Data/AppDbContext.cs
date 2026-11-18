@@ -16,6 +16,7 @@ public class AppDbContext : DbContext
     public DbSet<Session>        Sessions        => Set<Session>();
     public DbSet<SessionHistory> SessionHistories => Set<SessionHistory>();
     public DbSet<SessionEvent>   SessionEvents   => Set<SessionEvent>();
+    public DbSet<AgentePacote>   AgentePacotes   => Set<AgentePacote>();
     public DbSet<Command>        Commands        => Set<Command>();
     public DbSet<ServerProcess>  Processes       => Set<ServerProcess>();
 
@@ -82,6 +83,22 @@ public class AppDbContext : DbContext
             e.HasIndex(s => s.Name).IsUnique();
             e.Property(s => s.Name).IsRequired().HasMaxLength(100);
             e.Property(s => s.Cliente).HasMaxLength(100);
+            e.Property(s => s.AgentVersion).HasMaxLength(30);
+            e.Property(s => s.VersaoAlvo).HasMaxLength(30);
+            e.Property(s => s.AtualizacaoStatus).HasMaxLength(40);
+            e.Property(s => s.AtualizacaoMensagem).HasMaxLength(500);
+        });
+
+        // ── AgentePacote ─────────────────────────────────────
+        modelBuilder.Entity<AgentePacote>(e =>
+        {
+            e.ToTable("AgentePacotes");
+            e.HasIndex(p => p.Versao).IsUnique();
+            e.Property(p => p.Versao).IsRequired().HasMaxLength(30);
+            e.Property(p => p.NomeArquivo).IsRequired().HasMaxLength(200);
+            e.Property(p => p.NomeOriginal).HasMaxLength(260);
+            e.Property(p => p.Sha256).IsRequired().HasMaxLength(64);
+            e.Property(p => p.EnviadoPor).HasMaxLength(100);
         });
 
         // ── Session ──────────────────────────────────────────

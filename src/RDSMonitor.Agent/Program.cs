@@ -69,7 +69,8 @@ builder.Services.AddSingleton<SessionEventCollector>();
 builder.Services.AddSingleton<ProcessCollector>();
 builder.Services.AddSingleton<ApiClient>();
 builder.Services.AddSingleton<CommandExecutor>();
-builder.Services.AddSingleton<SimulatedSessionStore>();   // inativo, a menos que AgentSettings:Simulacao:Habilitada
+builder.Services.AddSingleton<SimulatedSessionStore>();
+builder.Services.AddSingleton<AgentUpdater>();          // atualização automática pedida pelo portal   // inativo, a menos que AgentSettings:Simulacao:Habilitada
 
 // ── Worker principal ──────────────────────────────────────────────────────────
 builder.Services.AddHostedService<Worker>();

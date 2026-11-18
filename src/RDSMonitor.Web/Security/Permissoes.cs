@@ -24,6 +24,7 @@ public static class Permissoes
     public const string ServidoresVer       = "servidores.ver";
     public const string ServidoresGerenciar = "servidores.gerenciar";
     public const string ServidoresReiniciar = "servidores.reiniciar";
+    public const string AgentesAtualizar    = "agentes.atualizar";
 
     // ── Relatórios e auditoria ───────────────────────────────
     public const string RelatoriosVer = "relatorios.ver";
@@ -58,6 +59,7 @@ public static class Permissoes
             new Definicao(ServidoresVer,       "Ver servidores",       "Tela de servidores, status e último heartbeat."),
             new Definicao(ServidoresGerenciar, "Gerenciar servidores", "Cadastrar, editar, habilitar/desabilitar e excluir."),
             new Definicao(ServidoresReiniciar, "Reiniciar serviço / servidor", "Reiniciar o serviço de Área de Trabalho Remota ou o servidor."),
+            new Definicao(AgentesAtualizar,    "Atualizar agentes",    "Enviar pacotes do agente e atualizar os agentes dos servidores pelo portal."),
         }),
         new Grupo("Relatórios e auditoria", new[]
         {

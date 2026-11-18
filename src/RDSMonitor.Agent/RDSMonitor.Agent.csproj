@@ -22,6 +22,8 @@
   <ItemGroup>
     <!-- Configuração de desenvolvimento não vai para o pacote de instalação -->
     <Content Update="appsettings.Development.json" CopyToPublishDirectory="Never" />
+    <!-- Script usado pela atualização automática (o agente o copia para _atualizacao antes de rodar) -->
+    <None Update="Scripts\atualizar-agente.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

@@ -35,7 +35,8 @@ public class ApiClient
     /// Envia o estado completo do servidor (sessões + processos) para a API.
     /// POST /api/agent/heartbeat
     /// </summary>
-    public async Task<bool> SendHeartbeatAsync(AgentHeartbeat heartbeat, CancellationToken ct = default)
+    /// <returns>A resposta do portal (null se o heartbeat falhou ou foi recusado).</returns>
+    public async Task<HeartbeatResposta?> SendHeartbeatAsync(AgentHeartbeat heartbeat, CancellationToken ct = default)
     {
         try
         {
@@ -45,17 +46,34 @@ public class ApiClient
             if (!response.IsSuccessStatusCode)
             {
                 _log.LogWarning("Heartbeat rejeitado pela API: {Status}", response.StatusCode);
-                return false;
+                return null;
             }
 
             _log.LogDebug("Heartbeat enviado: {Sessions} sessão(ões).", heartbeat.Sessions.Count);
-            return true;
+            try
+            {
+                return await response.Content.ReadFromJsonAsync<HeartbeatResposta>(_jsonOptions, ct) ?? new HeartbeatResposta();
+            }
+            catch (JsonException)
+            {
+                return new HeartbeatResposta();   // portal antigo: resposta sem os campos novos
+            }
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
             _log.LogWarning("Falha ao enviar heartbeat: {Msg}", ex.Message);
-            return false;
+            return null;
         }
+    }
+
+    /// <summary>Baixa um arquivo do portal (com a chave do agente) para <paramref name="destino"/>.</summary>
+    public async Task BaixarAsync(string url, string destino, CancellationToken ct)
+    {
+        using var resposta = await _http.GetAsync(url.TrimStart('/'), HttpCompletionOption.ResponseHeadersRead, ct);
+        resposta.EnsureSuccessStatusCode();
+        await using var origem  = await resposta.Content.ReadAsStreamAsync(ct);
+        await using var arquivo = File.Create(destino);
+        await origem.CopyToAsync(arquivo, ct);
     }
 
     // ── Comandos ──────────────────────────────────────────────────────────────

@@ -64,7 +64,7 @@ Para instalar o portal e os agentes em Windows Server, veja
 [docs/IMPLANTACAO.md](docs/IMPLANTACAO.md). Em resumo:
 
 ```powershell
-.\deploy\build-pacotes.ps1 -Versao 1.6.0     # gera dist\RDSMonitor.Web-*.zip e dist\RDSMonitor.Agent-*.zip
+.\deploy\build-pacotes.ps1 -Versao 1.7.0     # gera dist\RDSMonitor.Web-*.zip e dist\RDSMonitor.Agent-*.zip
 # no servidor do portal:      .\install-web.ps1 -SenhaAdmin "..."
 # em cada servidor RDS:       .\install-agent.ps1 -ServidorWeb <ip-ou-dns> -ApiKey "..."
 ```
@@ -245,6 +245,18 @@ máquina, IP ou servidor; a lista de processos só abre sozinha com **Mostrar
 processos** marcado (aí a pesquisa também procura em processo e PID). Sem a
 flag, clique na seta da sessão encontrada para ver os processos dela. No
 Dashboard, clicar num servidor abre Sessões já filtrada por ele.
+
+## Atualização automática dos agentes (1.7.0)
+
+Em **Administração > Atualização de agentes** o administrador envia o
+`RDSMonitor.Agent-x.y.z.zip` uma vez e atualiza os agentes de um, de vários ou de
+todos os servidores sem acessar cada um. O agente baixa o pacote do portal,
+confere o SHA-256 e a versão, e um script separado (`Scripts\atualizar-agente.ps1`)
+para o serviço, faz backup, espelha a versão nova preservando o
+`appsettings.json` e religa. Sem confirmação da versão nova em 3 minutos, ele
+restaura a anterior sozinho. Tudo vai para a Auditoria. Agentes anteriores à
+1.7.0 precisam ser atualizados uma última vez pelo instalador. Ver
+`docs/IMPLANTACAO.md`, seção 7.
 
 ## Usuários conectados e histórico de acessos
 

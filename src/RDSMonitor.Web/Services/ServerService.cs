@@ -75,12 +75,14 @@ public class ServerService : IServerService
     private const int MaxProcessos = 10_000;
 
     private readonly AppDbContext _db;
+    private readonly IAtualizacaoAgenteService _atualizacao;
     private readonly ILogger<ServerService> _log;
 
-    public ServerService(AppDbContext db, ILogger<ServerService> log)
+    public ServerService(AppDbContext db, IAtualizacaoAgenteService atualizacao, ILogger<ServerService> log)
     {
-        _db  = db;
-        _log = log;
+        _db          = db;
+        _atualizacao = atualizacao;
+        _log         = log;
     }
 
     // ── Consultas ────────────────────────────────────────────
@@ -221,6 +223,9 @@ public class ServerService : IServerService
         server.CpuPercent     = Math.Round(dto.CpuPercent, 1);
         server.MemoryUsedGb   = Math.Round(dto.MemoryUsedGb, 2);
         server.MemoryTotalGb  = Math.Round(dto.MemoryTotalGb, 2);
+
+        // Versão do agente e conclusão/falha da atualização automática em andamento
+        await _atualizacao.RegistrarHeartbeatAsync(server, dto.AgentVersion, dto.UpdateResult);
 
         // O banco guarda tudo em UTC (as telas convertem com ToLocalTime).
         foreach (var sessionDto in dto.Sessions)

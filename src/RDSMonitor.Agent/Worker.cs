@@ -19,6 +19,7 @@ public class Worker : BackgroundService
     private readonly ApiClient           _api;
     private readonly CommandExecutor     _executor;
     private readonly SimulatedSessionStore _simulacao;
+    private readonly AgentUpdater        _atualizador;
     private readonly ILogger<Worker>     _log;
 
     // Evita que o heartbeat periódico e o heartbeat imediato (pós-comando)
@@ -33,8 +34,10 @@ public class Worker : BackgroundService
         ApiClient        api,
         CommandExecutor  executor,
         SimulatedSessionStore simulacao,
+        AgentUpdater     atualizador,
         ILogger<Worker>  log)
     {
+        _atualizador = atualizador;
         _simulacao = simulacao;
         _settings  = settings;
         _sessions  = sessions;
@@ -116,13 +119,22 @@ public class Worker : BackgroundService
                 Sessions      = sessions,
                 Processes     = processes,
                 Events        = events,
+                AgentVersion  = AgentUpdater.VersaoAtual.ToString(),
+                UpdateResult  = _atualizador.ResultadoPendente(),
             };
 
             // Eventos só saem da fila quando o portal aceita o heartbeat
-            if (await _api.SendHeartbeatAsync(heartbeat, ct))
+            var resposta = await _api.SendHeartbeatAsync(heartbeat, ct);
+            if (resposta is not null)
             {
                 _eventos.Confirmar(events);
                 if (eventosSimulados.Count > 0) _simulacao.ConfirmarEventos(eventosSimulados);
+                if (heartbeat.UpdateResult is not null) _atualizador.ResultadoEntregue();
+                _atualizador.ConfirmarFuncionamento();
+
+                // Portal pediu atualização: roda em segundo plano, sem travar o heartbeat
+                if (resposta.Update is { } instrucao)
+                    _atualizador.Iniciar(instrucao);
             }
         }
         catch (OperationCanceledException) { /* serviço encerrando */ }

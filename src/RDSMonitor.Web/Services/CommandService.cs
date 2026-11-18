@@ -68,6 +68,7 @@ public class CommandService : ICommandService
         CommandType.SendMessage    => Permissoes.SessoesMensagem,
         CommandType.RestartService => Permissoes.ServidoresReiniciar,
         CommandType.RestartServer  => Permissoes.ServidoresReiniciar,
+        CommandType.AtualizarAgente => Permissoes.AgentesAtualizar,
         _                          => Permissoes.ComandosManuais,
     };
 

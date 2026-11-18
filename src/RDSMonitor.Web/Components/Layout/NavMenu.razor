@@ -56,6 +56,13 @@
                         </NavLink>
                     </li>
                 </AuthorizeView>
+                <AuthorizeView Policy="@Permissoes.AgentesAtualizar">
+                    <li class="nav-item">
+                        <NavLink class="nav-link" href="atualizacao-agentes">
+                            <i class="fa-solid fa-cloud-arrow-down"></i> Atualização de agentes
+                        </NavLink>
+                    </li>
+                </AuthorizeView>
                 <AuthorizeView Policy="@Permissoes.UsuariosGerenciar">
                     <li class="nav-item">
                         <NavLink class="nav-link" href="usuarios">
@@ -88,6 +95,7 @@
         if (AuthState is null) return;
         var p = await PermissaoService.DoUsuarioAsync((await AuthState).User);
         temAdministracao = p.Contains(Permissoes.ComandosManuais)
+                        || p.Contains(Permissoes.AgentesAtualizar)
                         || p.Contains(Permissoes.UsuariosGerenciar)
                         || p.Contains(Permissoes.PerfisGerenciar);
     }

@@ -16,6 +16,37 @@ public class AgentHeartbeat
 
     /// <summary>Desconexões e reconexões lidas do log do Windows desde o último envio.</summary>
     public List<SessionEventInfo> Events { get; set; } = new();
+
+    /// <summary>Versão deste agente (ex.: "1.7.0.0") — o portal decide se precisa atualizar.</summary>
+    public string? AgentVersion { get; set; }
+
+    /// <summary>Resultado da última atualização automática, enviado uma vez depois dela.</summary>
+    public AtualizacaoResultado? UpdateResult { get; set; }
+}
+
+/// <summary>Resposta do portal ao heartbeat.</summary>
+public class HeartbeatResposta
+{
+    /// <summary>Preenchido quando o portal pede a atualização deste agente.</summary>
+    public AtualizacaoInstrucao? Update { get; set; }
+}
+
+public class AtualizacaoInstrucao
+{
+    public string Version { get; set; } = string.Empty;
+    public string Sha256  { get; set; } = string.Empty;
+    public long   Size    { get; set; }
+    /// <summary>Caminho relativo no portal (ex.: "api/agent/pacote/1.7.0.0").</summary>
+    public string Url     { get; set; } = string.Empty;
+}
+
+/// <summary>Gravado pelo script de atualização em _atualizacao\resultado.json.</summary>
+public class AtualizacaoResultado
+{
+    public string   Versao   { get; set; } = string.Empty;
+    public bool     Sucesso  { get; set; }
+    public string?  Mensagem { get; set; }
+    public DateTime Em       { get; set; }
 }
 
 /// <summary>
