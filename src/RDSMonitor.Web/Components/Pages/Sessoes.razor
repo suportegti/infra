@@ -1,13 +1,42 @@
 @page "/sessoes"
 @rendermode InteractiveServer
-@attribute [Authorize]
+@attribute [Authorize(Policy = Permissoes.SessoesVer)]
 @inject IServerService ServerService
 @inject ICommandService CommandService
+@inject IPermissaoService PermissaoService
 @implements IDisposable
 
 <PageTitle>Sessões · RDSManager</PageTitle>
 
 <ConfirmDialog @ref="confirmacao" />
+
+@if (msgAlvo is { } alvoMsg)
+{
+    <div class="rds-modal-backdrop" @onclick="FecharMensagem">
+        <div class="rds-modal" role="dialog" aria-modal="true" aria-labelledby="msg-titulo"
+             @onclick:stopPropagation @onkeydown="TeclaMensagem">
+            <div class="rds-modal-header">
+                <span class="rds-modal-icon"><i class="fa-solid fa-message"></i></span>
+                <h2 id="msg-titulo">Enviar mensagem</h2>
+            </div>
+            <p class="rds-modal-msg">A mensagem aparece em uma janela na tela do usuário.</p>
+            <dl class="rds-modal-details">
+                <dt>Usuário</dt><dd>@alvoMsg.Sess.Username</dd>
+                <dt>Sessão</dt><dd>@alvoMsg.Sess.RdsSessionId</dd>
+                <dt>Servidor</dt><dd>@alvoMsg.Sv.Name</dd>
+            </dl>
+            <textarea class="rds-modal-text" rows="4" maxlength="500" autofocus
+                      placeholder="Ex.: O servidor será reiniciado às 19h. Salve seus arquivos."
+                      @bind="msgTexto" @bind:event="oninput"></textarea>
+            <div class="rds-modal-actions">
+                <button type="button" class="btn-pill" @onclick="FecharMensagem">Cancelar</button>
+                <button type="button" class="btn-pill primary" disabled="@string.IsNullOrWhiteSpace(msgTexto)" @onclick="EnviarMensagemAsync">
+                    <i class="fa-solid fa-paper-plane"></i> Enviar
+                </button>
+            </div>
+        </div>
+    </div>
+}
 
 <div class="dash-header">
     <h1>Sessões</h1>
@@ -15,6 +44,8 @@
 </div>
 
 <div class="toolbar">
+    @if (podeVerProcessos)
+    {
     <div class="toolbar-search process-search">
         <i class="fa-solid fa-magnifying-glass"></i>
         <input type="text"
@@ -29,6 +60,7 @@
             </button>
         }
     </div>
+    }
     <div class="toolbar-search" style="flex:0 1 220px;min-width:180px;">
         <i class="fa-solid fa-hard-drive"></i>
         <select @bind="servidorSelecionadoId" @bind:after="AtualizarAsync" class="toolbar-select" aria-label="Filtrar por servidor">
@@ -39,9 +71,12 @@
             }
         </select>
     </div>
+    @if (podeVerProcessos)
+    {
     <label class="toolbar-check" title="Processos do Windows (csrss, dwm, svchost...) e de contas de sistema. Não podem ser derrubados.">
         <input type="checkbox" @bind="mostrarSistema" /> Processos do sistema
     </label>
+    }
     <div class="toolbar-actions">
         <button class="btn-pill" @onclick="AtualizarAsync">
             <i class="fa-solid fa-rotate"></i> Atualizar
@@ -66,7 +101,7 @@
     if (BuscaAtiva)
         sessoes = sessoes.Where(x => ProcessosVisiveis(x.sv.Id, x.sess.RdsSessionId).Count > 0).ToList();
 
-    var colunas = podeAdministrar ? 10 : 9;
+    var colunas = PodeAgirNaSessao ? 10 : 9;
 }
 
 @if (BuscaAtiva)
@@ -111,7 +146,7 @@ else
                 <th>Memória</th>
                 <th>Login</th>
                 <th>Ociosidade</th>
-                @if (podeAdministrar) { <th>Ações</th> }
+                @if (PodeAgirNaSessao) { <th>Ações</th> }
             </tr>
         </thead>
         <tbody>
@@ -121,7 +156,7 @@ else
                 var expandida = BuscaAtiva || expandidas.Contains(chave);
                 <tr class="@(expandida ? "row-expanded" : "")">
                     <td>
-                        @if (!BuscaAtiva)
+                        @if (!BuscaAtiva && podeVerProcessos)
                         {
                             <button class="btn-expand" @onclick="() => AlternarProcessosAsync(sv.Id, sess.RdsSessionId)"
                                     title="@(expandida ? "Ocultar processos" : "Ver processos")"
@@ -153,23 +188,37 @@ else
                     <td class="mono">@FormatarMemoria(sess.MemoryMb)</td>
                     <td class="mono">@sess.LogonTime.ToLocalTime().ToString("dd/MM HH:mm")</td>
                     <td class="mono">@(sess.IdleTimeMinutes == 0 ? "—" : FormatarOciosidade(sess.IdleTimeMinutes))</td>
-                    @if (podeAdministrar)
+                    @if (PodeAgirNaSessao)
                     {
                         <td class="acoes">
-                            <button class="btn-acao" @onclick="() => DisconnectAsync(sv, sess)"
-                                    disabled="@(sess.State == SessionState.Disconnected)"
-                                    title="@(sess.State == SessionState.Disconnected ? "Sessão já está desconectada" : "Desconectar mantendo os programas abertos")">
-                                Disconnect
-                            </button>
-                            <button class="btn-acao danger" @onclick="() => LogoffAsync(sv, sess)"
-                                    title="Encerrar a sessão (fecha todos os programas do usuário)">
-                                Logoff
-                            </button>
+                            @if (podeMensagem)
+                            {
+                                <button class="btn-acao" @onclick="() => AbrirMensagem(sv, sess)"
+                                        disabled="@(sess.State == SessionState.Disconnected)"
+                                        title="@(sess.State == SessionState.Disconnected ? "Sessão desconectada: o usuário não veria a mensagem" : "Mostrar uma mensagem na tela do usuário")">
+                                    <i class="fa-solid fa-message"></i> Mensagem
+                                </button>
+                            }
+                            @if (podeDesconectar)
+                            {
+                                <button class="btn-acao" @onclick="() => DisconnectAsync(sv, sess)"
+                                        disabled="@(sess.State == SessionState.Disconnected)"
+                                        title="@(sess.State == SessionState.Disconnected ? "Sessão já está desconectada" : "Desconectar mantendo os programas abertos")">
+                                    Disconnect
+                                </button>
+                            }
+                            @if (podeLogoff)
+                            {
+                                <button class="btn-acao danger" @onclick="() => LogoffAsync(sv, sess)"
+                                        title="Encerrar a sessão (fecha todos os programas do usuário)">
+                                    Logoff
+                                </button>
+                            }
                         </td>
                     }
                 </tr>
 
-                @if (expandida)
+                @if (expandida && podeVerProcessos)
                 {
                     var todos    = processos.TryGetValue(chave, out var lista) ? lista : new List<ServerProcess>();
                     var visiveis = ProcessosVisiveis(sv.Id, sess.RdsSessionId);
@@ -192,7 +241,7 @@ else
                                             <th>Dono</th>
                                             <th>CPU</th>
                                             <th>Memória</th>
-                                            @if (podeAdministrar) { <th></th> }
+                                            @if (podeDerrubar) { <th></th> }
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -211,7 +260,7 @@ else
                                                 <td>@Realcar(proc.Username ?? "—")</td>
                                                 <td class="mono">@proc.CpuPercent.ToString("0.#")%</td>
                                                 <td class="mono">@FormatarMemoria(proc.MemoryMb)</td>
-                                                @if (podeAdministrar)
+                                                @if (podeDerrubar)
                                                 {
                                                     <td class="acoes">
                                                         @if (proc.IsProtected)
@@ -260,8 +309,15 @@ else
     private List<Server> servidores = new();
     private int     servidorSelecionadoId;
     private bool    mostrarSistema;
-    private bool    podeAdministrar;
-    private string  operador = "portal";
+    private System.Security.Claims.ClaimsPrincipal usuario = new();
+
+    // Permissões do usuário (reavaliadas a cada atualização da tela)
+    private bool podeVerProcessos, podeMensagem, podeDesconectar, podeLogoff, podeDerrubar;
+    private bool PodeAgirNaSessao => podeMensagem || podeDesconectar || podeLogoff;
+
+    // Mensagem
+    private (Server Sv, Session Sess)? msgAlvo;
+    private string msgTexto = string.Empty;
     private string? mensagem;
     private bool    erroMensagem;
 
@@ -281,13 +337,11 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        var auth        = await AuthState;
-        podeAdministrar = auth.User.IsInRole("Administrador");
-        operador        = auth.User.Identity?.Name ?? "portal";
+        usuario = (await AuthState).User;
 
         await AtualizarAsync();
 
-        _timer = new System.Timers.Timer(10_000);
+        _timer = new System.Timers.Timer(5_000);
         _timer.Elapsed += async (_, _) => await InvokeAsync(async () =>
         {
             await AtualizarAsync();
@@ -296,8 +350,40 @@ else
         _timer.Start();
     }
 
+    /// <summary>
+    /// Após enviar um comando (logoff, disconnect, mensagem, derrubar), agenda
+    /// alguns refreshes curtos para a tela mostrar o resultado assim que o agente
+    /// executar e enviar o heartbeat imediato, sem esperar o ciclo normal.
+    /// </summary>
+    private void AtualizarEmBreve()
+    {
+        foreach (var atrasoMs in new[] { 2_000, 4_000, 6_500 })
+        {
+            var t = new System.Timers.Timer(atrasoMs) { AutoReset = false };
+            t.Elapsed += async (_, _) =>
+            {
+                try { await InvokeAsync(async () => { await AtualizarAsync(); StateHasChanged(); }); }
+                catch { /* componente pode ter sido descartado */ }
+                finally { t.Dispose(); }
+            };
+            t.Start();
+        }
+    }
+
+    private async Task CarregarPermissoesAsync()
+    {
+        var p = await PermissaoService.DoUsuarioAsync(usuario);
+        podeVerProcessos = p.Contains(Permissoes.ProcessosVer);
+        podeMensagem     = p.Contains(Permissoes.SessoesMensagem);
+        podeDesconectar  = p.Contains(Permissoes.SessoesDesconectar);
+        podeLogoff       = p.Contains(Permissoes.SessoesLogoff);
+        podeDerrubar     = p.Contains(Permissoes.ProcessosDerrubar) && podeVerProcessos;
+        if (!podeVerProcessos) { busca = string.Empty; expandidas.Clear(); }
+    }
+
     private async Task AtualizarAsync()
     {
+        await CarregarPermissoesAsync();
         servidores = await ServerService.GetAllWithSessionsAsync();
 
         // Esquece sessões que encerraram
@@ -413,16 +499,18 @@ else
         if (!ok) return;
 
         // Nome e sessão vão junto para o agente conferir que o PID ainda é o mesmo processo.
-        var cmd = await CommandService.CreateAsync(sv.Id, CommandType.KillProcess,
+        var cmd = await CriarComandoAsync(sv.Id, CommandType.KillProcess,
             new Dictionary<string, string>
             {
                 { "Pid",         proc.Pid.ToString() },
                 { "ProcessName", proc.Name },
                 { "SessionId",   sess.RdsSessionId.ToString() },
-            }, operador);
+            });
+        if (cmd is null) return;
 
         killsPendentes[cmd.Id] = (sv.Id, proc.Pid, proc.Name);
         Avisar($"Comando para derrubar \"{proc.Name}\" (PID {proc.Pid}) enviado a {sv.Name}. O agente executa em alguns segundos.", erro: false);
+        AtualizarEmBreve();
     }
 
     /// <summary>Mostra o resultado dos comandos de derrubar quando o agente responder.</summary>
@@ -481,13 +569,61 @@ else
 
     private async Task EnfileirarAsync(Server sv, Session sess, CommandType tipo)
     {
-        await CommandService.CreateAsync(sv.Id, tipo,
-            new Dictionary<string, string> { { "SessionId", sess.RdsSessionId.ToString() } }, operador);
+        if (await CriarComandoAsync(sv.Id, tipo,
+                new Dictionary<string, string> { { "SessionId", sess.RdsSessionId.ToString() } }) is null)
+            return;
         var acao = tipo == CommandType.Logoff ? "Logoff" : "Disconnect";
-        Avisar($"{acao} de {sess.Username} (sessão {sess.RdsSessionId}) enviado a {sv.Name}. O agente executa no próximo ciclo.", erro: false);
+        Avisar($"{acao} de {sess.Username} (sessão {sess.RdsSessionId}) enviado a {sv.Name}. O agente executa em alguns segundos.", erro: false);
+        AtualizarEmBreve();
+    }
+
+    // ── Mensagem ──────────────────────────────────────────────
+
+    private void AbrirMensagem(Server sv, Session sess)
+    {
+        msgAlvo  = (sv, sess);
+        msgTexto = string.Empty;
+    }
+
+    private void FecharMensagem() => msgAlvo = null;
+
+    private void TeclaMensagem(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") FecharMensagem();
+    }
+
+    private async Task EnviarMensagemAsync()
+    {
+        if (msgAlvo is not { } alvo || string.IsNullOrWhiteSpace(msgTexto)) return;
+        var texto = msgTexto.Trim();
+        msgAlvo = null;
+
+        var cmd = await CriarComandoAsync(alvo.Sv.Id, CommandType.SendMessage, new Dictionary<string, string>
+        {
+            { "SessionId", alvo.Sess.RdsSessionId.ToString() },
+            { "Message",   texto },
+            { "Title",     "Mensagem do administrador" },
+        });
+        if (cmd is not null)
+            Avisar($"Mensagem para {alvo.Sess.Username} (sessão {alvo.Sess.RdsSessionId}) enviada a {alvo.Sv.Name}.", erro: false);
     }
 
     // ── Helpers ───────────────────────────────────────────────
+
+    /// <summary>Enfileira o comando; o serviço confere a permissão e grava a auditoria.</summary>
+    private async Task<Command?> CriarComandoAsync(int serverId, CommandType tipo, Dictionary<string, string> parametros)
+    {
+        try
+        {
+            return await CommandService.CreateAsync(serverId, tipo, parametros, usuario);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            Avisar(ex.Message, erro: true);
+            await CarregarPermissoesAsync();
+            return null;
+        }
+    }
 
     private void Avisar(string texto, bool erro)
     {

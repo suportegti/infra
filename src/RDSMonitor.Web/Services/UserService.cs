@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using RDSMonitor.Web.Data;
 using RDSMonitor.Web.Models;
+using RDSMonitor.Web.Security;
 
 namespace RDSMonitor.Web.Services;
 
@@ -9,10 +10,25 @@ public class UserService : IUserService
 {
     private readonly AppDbContext _db;
     private readonly PasswordHasher<AppUser> _hasher = new();
+    private readonly IPermissaoService _permissoes;
 
-    public UserService(AppDbContext db)
+    public UserService(AppDbContext db, IPermissaoService permissoes)
     {
         _db = db;
+        _permissoes = permissoes;
+    }
+
+    /// <summary>
+    /// Impede que o sistema fique sem nenhum administrador ativo (alguém
+    /// precisa conseguir gerenciar usuários e perfis).
+    /// </summary>
+    private async Task<bool> EhUltimoAdministradorAtivoAsync(AppUser user)
+    {
+        var perfilAdmin = await _db.Perfis.Where(p => p.Sistema && p.Nome == Permissoes.PerfilAdministrador)
+                                          .Select(p => (int?)p.Id).FirstOrDefaultAsync();
+        if (perfilAdmin is null || user.PerfilId != perfilAdmin || !user.Ativo) return false;
+
+        return !await _db.Users.AnyAsync(u => u.Id != user.Id && u.Ativo && u.PerfilId == perfilAdmin);
     }
 
     // TODO: quando a integração com Active Directory / Microsoft Entra ID
@@ -21,7 +37,7 @@ public class UserService : IUserService
     // hash local apenas como alternativa para contas de serviço.
     public async Task<AppUser?> ValidarCredenciaisAsync(string username, string password)
     {
-        var user = await _db.Users.FirstOrDefaultAsync(u =>
+        var user = await _db.Users.Include(u => u.Perfil).FirstOrDefaultAsync(u =>
             u.Username.ToLower() == username.ToLower() && u.Ativo);
 
         if (user is null)
@@ -75,15 +91,15 @@ public class UserService : IUserService
 
     public async Task<List<AppUser>> ListarAsync()
     {
-        return await _db.Users.OrderBy(u => u.Username).ToListAsync();
+        return await _db.Users.AsNoTracking().Include(u => u.Perfil).OrderBy(u => u.Username).ToListAsync();
     }
 
     public async Task<AppUser?> ObterPorIdAsync(int id)
     {
-        return await _db.Users.FindAsync(id);
+        return await _db.Users.AsNoTracking().Include(u => u.Perfil).FirstOrDefaultAsync(u => u.Id == id);
     }
 
-    public async Task<UserOperationResult> CriarAsync(string username, string displayName, UserProfile profile, string senhaInicial)
+    public async Task<UserOperationResult> CriarAsync(string username, string displayName, int perfilId, string senhaInicial)
     {
         username = username?.Trim() ?? string.Empty;
         displayName = displayName?.Trim() ?? string.Empty;
@@ -98,6 +114,11 @@ public class UserService : IUserService
             return UserOperationResult.SenhaInvalida;
         }
 
+        if (!await _db.Perfis.AnyAsync(p => p.Id == perfilId))
+        {
+            return UserOperationResult.DadosInvalidos;
+        }
+
         var jaExiste = await _db.Users.AnyAsync(u => u.Username.ToLower() == username.ToLower());
 
         if (jaExiste)
@@ -109,7 +130,7 @@ public class UserService : IUserService
         {
             Username = username,
             DisplayName = displayName,
-            Profile = profile,
+            PerfilId = perfilId,
             Ativo = true,
         };
 
@@ -121,7 +142,7 @@ public class UserService : IUserService
         return UserOperationResult.Sucesso;
     }
 
-    public async Task<UserOperationResult> EditarAsync(int id, string displayName, UserProfile profile, string? novaSenha)
+    public async Task<UserOperationResult> EditarAsync(int id, string displayName, int perfilId, string? novaSenha)
     {
         var user = await _db.Users.FindAsync(id);
 
@@ -142,8 +163,18 @@ public class UserService : IUserService
             return UserOperationResult.SenhaInvalida;
         }
 
+        if (!await _db.Perfis.AnyAsync(p => p.Id == perfilId))
+        {
+            return UserOperationResult.DadosInvalidos;
+        }
+
+        if (user.PerfilId != perfilId && await EhUltimoAdministradorAtivoAsync(user))
+        {
+            return UserOperationResult.UltimoAdministrador;
+        }
+
         user.DisplayName = displayName;
-        user.Profile = profile;
+        user.PerfilId = perfilId;
 
         if (!string.IsNullOrWhiteSpace(novaSenha))
         {
@@ -151,6 +182,7 @@ public class UserService : IUserService
         }
 
         await _db.SaveChangesAsync();
+        _permissoes.Invalidar();
 
         return UserOperationResult.Sucesso;
     }
@@ -164,10 +196,38 @@ public class UserService : IUserService
             return UserOperationResult.NaoEncontrado;
         }
 
+        if (user.Ativo && await EhUltimoAdministradorAtivoAsync(user))
+        {
+            return UserOperationResult.UltimoAdministrador;
+        }
+
         user.Ativo = !user.Ativo;
         await _db.SaveChangesAsync();
+        _permissoes.Invalidar();
 
         return UserOperationResult.Sucesso;
+    }
+
+    public async Task<UserOperationResult> DesbloquearAsync(int id)
+    {
+        var user = await _db.Users.FindAsync(id);
+        if (user is null) return UserOperationResult.NaoEncontrado;
+
+        user.AccessFailedCount = 0;
+        user.LockoutEnd        = null;
+        await _db.SaveChangesAsync();
+        return UserOperationResult.Sucesso;
+    }
+
+    public async Task<bool> DesbloquearAsync(string username)
+    {
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Username.ToLower() == username.ToLower());
+        if (user is null) return false;
+
+        user.AccessFailedCount = 0;
+        user.LockoutEnd        = null;
+        await _db.SaveChangesAsync();
+        return true;
     }
 
     public async Task<bool> RedefinirSenhaAsync(string username, string novaSenha)
@@ -181,7 +241,20 @@ public class UserService : IUserService
 
         user.PasswordHash = _hasher.HashPassword(user, novaSenha);
         user.Ativo = true;
+
+        // Recuperação de acesso: zera o bloqueio por tentativas, se houver
+        user.AccessFailedCount = 0;
+        user.LockoutEnd        = null;
+
+        // Recuperação de acesso: o admin volta a ter o perfil Administrador
+        if (user.Username.Equals("admin", StringComparison.OrdinalIgnoreCase))
+        {
+            user.PerfilId = await _db.Perfis.Where(p => p.Sistema && p.Nome == Permissoes.PerfilAdministrador)
+                                            .Select(p => (int?)p.Id).FirstOrDefaultAsync() ?? user.PerfilId;
+        }
+
         await _db.SaveChangesAsync();
+        _permissoes.Invalidar();
 
         return true;
     }

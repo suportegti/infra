@@ -4,57 +4,91 @@
         <span>RDSManager</span>
     </div>
     <ul class="nav flex-column">
-        <li class="nav-item">
-            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
-                <i class="fa-solid fa-gauge-high"></i> Dashboard
-            </NavLink>
-        </li>
-        <li class="nav-item">
-            <NavLink class="nav-link" href="sessoes">
-                <i class="fa-solid fa-desktop"></i> Sessões
-            </NavLink>
-        </li>
-        <AuthorizeView Roles="Administrador,Operador">
-            <Authorized>
-                <li class="nav-item">
-                    <NavLink class="nav-link" href="servidores">
-                        <i class="fa-solid fa-hard-drive"></i> Servidores
-                    </NavLink>
-                </li>
-            </Authorized>
+        <AuthorizeView Policy="@Permissoes.DashboardVer">
+            <li class="nav-item">
+                <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+                    <i class="fa-solid fa-gauge-high"></i> Dashboard
+                </NavLink>
+            </li>
         </AuthorizeView>
-        <li class="nav-item">
-            <NavLink class="nav-link" href="relatorios">
-                <i class="fa-solid fa-chart-line"></i> Relatórios
-            </NavLink>
-        </li>
+        <AuthorizeView Policy="@Permissoes.SessoesVer">
+            <li class="nav-item">
+                <NavLink class="nav-link" href="sessoes">
+                    <i class="fa-solid fa-desktop"></i> Sessões
+                </NavLink>
+            </li>
+        </AuthorizeView>
+        <AuthorizeView Policy="@Permissoes.ServidoresVer">
+            <li class="nav-item">
+                <NavLink class="nav-link" href="servidores">
+                    <i class="fa-solid fa-hard-drive"></i> Servidores
+                </NavLink>
+            </li>
+        </AuthorizeView>
+        <AuthorizeView Policy="@Permissoes.RelatoriosVer">
+            <li class="nav-item">
+                <NavLink class="nav-link" href="relatorios">
+                    <i class="fa-solid fa-chart-line"></i> Relatórios
+                </NavLink>
+            </li>
+        </AuthorizeView>
+        <AuthorizeView Policy="@Permissoes.AuditoriaVer">
+            <li class="nav-item">
+                <NavLink class="nav-link" href="auditoria">
+                    <i class="fa-solid fa-clipboard-list"></i> Auditoria
+                </NavLink>
+            </li>
+        </AuthorizeView>
     </ul>
 
-    <AuthorizeView Roles="Administrador">
-        <Authorized>
-            <details class="nav-group" open>
-                <summary>
-                    <span>Administração</span>
-                    <i class="fa-solid fa-chevron-down chevron"></i>
-                </summary>
-                <ul class="nav flex-column">
+    @if (temAdministracao)
+    {
+        <details class="nav-group" open>
+            <summary>
+                <span>Administração</span>
+                <i class="fa-solid fa-chevron-down chevron"></i>
+            </summary>
+            <ul class="nav flex-column">
+                <AuthorizeView Policy="@Permissoes.ComandosManuais">
                     <li class="nav-item">
                         <NavLink class="nav-link" href="administracao">
                             <i class="fa-solid fa-screwdriver-wrench"></i> Ações administrativas
                         </NavLink>
                     </li>
+                </AuthorizeView>
+                <AuthorizeView Policy="@Permissoes.UsuariosGerenciar">
                     <li class="nav-item">
                         <NavLink class="nav-link" href="usuarios">
                             <i class="fa-solid fa-users-gear"></i> Usuários do sistema
                         </NavLink>
                     </li>
+                </AuthorizeView>
+                <AuthorizeView Policy="@Permissoes.PerfisGerenciar">
                     <li class="nav-item">
                         <NavLink class="nav-link" href="perfis-usuarios">
                             <i class="fa-solid fa-user-shield"></i> Perfis de usuários
                         </NavLink>
                     </li>
-                </ul>
-            </details>
-        </Authorized>
-    </AuthorizeView>
+                </AuthorizeView>
+            </ul>
+        </details>
+    }
 </nav>
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthState { get; set; }
+
+    [Inject] private IPermissaoService PermissaoService { get; set; } = null!;
+
+    private bool temAdministracao;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (AuthState is null) return;
+        var p = await PermissaoService.DoUsuarioAsync((await AuthState).User);
+        temAdministracao = p.Contains(Permissoes.ComandosManuais)
+                        || p.Contains(Permissoes.UsuariosGerenciar)
+                        || p.Contains(Permissoes.PerfisGerenciar);
+    }
+}

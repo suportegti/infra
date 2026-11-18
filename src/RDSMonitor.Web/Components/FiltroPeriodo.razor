@@ -1,0 +1,61 @@
+@* Seletor de período (data + hora separadas) com atalhos. O estado fica em
+   PeriodoFiltro, que pertence à página; cada alteração dispara OnAlterado. *@
+
+<div class="audit-rapidos" role="group" aria-label="Períodos rápidos">
+    <span class="sub-label">Período:</span>
+    @foreach (var (codigo, nome) in PeriodoFiltro.Rapidos)
+    {
+        <button type="button" class="btn-pill @(Periodo.Rapido == codigo ? "primary" : "")"
+                aria-pressed="@(Periodo.Rapido == codigo)"
+                @onclick="() => RapidoAsync(codigo)">@nome</button>
+    }
+    <button type="button" class="btn-pill @(Periodo.Rapido == "tudo" ? "primary" : "")"
+            aria-pressed="@(Periodo.Rapido == "tudo")"
+            @onclick='() => RapidoAsync("tudo")'>Tudo</button>
+</div>
+
+<div class="periodo-campos">
+    <fieldset class="periodo-par">
+        <legend>De</legend>
+        <div class="periodo-inputs">
+            <input type="date" aria-label="Data inicial" value="@Periodo.DeData" @onchange="e => ManualAsync(v => Periodo.DeData = v, e)" />
+            <input type="time" aria-label="Hora inicial" value="@Periodo.DeHora" @onchange="e => ManualAsync(v => Periodo.DeHora = v, e)" />
+        </div>
+    </fieldset>
+    <fieldset class="periodo-par">
+        <legend>Até</legend>
+        <div class="periodo-inputs">
+            <input type="date" aria-label="Data final" value="@Periodo.AteData" @onchange="e => ManualAsync(v => Periodo.AteData = v, e)" />
+            <input type="time" aria-label="Hora final" value="@Periodo.AteHora" @onchange="e => ManualAsync(v => Periodo.AteHora = v, e)" />
+        </div>
+    </fieldset>
+</div>
+<p class="sub-label periodo-ajuda @(Periodo.Invalido ? "periodo-erro" : "")" role="status">
+    @if (Periodo.Invalido)
+    {
+        <i class="fa-solid fa-triangle-exclamation"></i> <span>A data/hora final é anterior à inicial.</span>
+    }
+    else
+    {
+        <span>Pesquisando @Periodo.Descricao. Sem hora, o "De" começa às 00:00 e o "Até" vai até 23:59; "Até" só com a hora usa o mesmo dia do "De".</span>
+    }
+</p>
+
+@code {
+    [Parameter, EditorRequired] public PeriodoFiltro Periodo { get; set; } = null!;
+    [Parameter] public EventCallback OnAlterado { get; set; }
+
+    private async Task RapidoAsync(string codigo)
+    {
+        Periodo.Aplicar(codigo);
+        await OnAlterado.InvokeAsync();
+    }
+
+    private async Task ManualAsync(Action<string?> definir, ChangeEventArgs e)
+    {
+        var v = e.Value?.ToString();
+        definir(string.IsNullOrWhiteSpace(v) ? null : v);
+        Periodo.Rapido = null;
+        if (!Periodo.Invalido) await OnAlterado.InvokeAsync();
+    }
+}

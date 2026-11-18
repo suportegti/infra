@@ -1,12 +1,13 @@
 @page "/usuarios"
-@attribute [Authorize(Roles = "Administrador")]
+@attribute [Authorize(Policy = Permissoes.UsuariosGerenciar)]
 @inject IUserService UserService
+@inject IPerfilService PerfilService
 
 <PageTitle>Usuários do Sistema · RDSManager</PageTitle>
 
 <div class="dash-header">
     <h1>Usuários do sistema</h1>
-    <p>Inclua, edite ou desabilite usuários com acesso ao RDSManager.</p>
+    <p>Inclua, edite ou desabilite usuários com acesso ao RDSManager. Usuários não são excluídos, só desabilitados, para preservar o histórico de auditoria.</p>
 </div>
 
 @if (Sucesso == "criado")
@@ -20,6 +21,10 @@ else if (Sucesso == "editado")
 else if (Sucesso == "status")
 {
     <div class="login-alert login-alert-success" role="alert">Status do usuário atualizado.</div>
+}
+else if (Sucesso == "desbloqueado")
+{
+    <div class="login-alert login-alert-success" role="alert">Bloqueio removido. O usuário já pode entrar com a senha atual.</div>
 }
 else if (Erro == "usuario-existe")
 {
@@ -36,6 +41,10 @@ else if (Erro == "dados-invalidos")
 else if (Erro == "nao-encontrado")
 {
     <div class="login-alert" role="alert">Usuário não encontrado.</div>
+}
+else if (Erro == "ultimo-admin")
+{
+    <div class="login-alert" role="alert">Não é possível desabilitar o último administrador ativo do sistema.</div>
 }
 
 <details class="form-card">
@@ -55,10 +64,11 @@ else if (Erro == "nao-encontrado")
             </label>
             <label class="field">
                 <i class="fa-solid fa-user-shield"></i>
-                <select name="profile" required>
-                    <option value="Administrador">Administrador</option>
-                    <option value="Operador">Operador</option>
-                    <option value="Auditor">Auditor</option>
+                <select name="perfilId" required>
+                    @foreach (var p in Perfis)
+                    {
+                        <option value="@p.Id" selected="@(p.Nome == Permissoes.PerfilOperador)">@p.Nome</option>
+                    }
                 </select>
             </label>
             <label class="field">
@@ -89,14 +99,27 @@ else if (Erro == "nao-encontrado")
             <tr>
                 <td class="mono">@usuario.Username</td>
                 <td>@usuario.DisplayName</td>
-                <td><span class="badge bg-secondary">@usuario.Profile</span></td>
+                <td><span class="badge bg-secondary">@(usuario.Perfil?.Nome ?? "Sem perfil")</span></td>
                 <td>
                     <span class="status-dot @(usuario.Ativo ? "active" : "disconnected")"></span>
                     @(usuario.Ativo ? "Ativo" : "Desabilitado")
+                    @if (Bloqueado(usuario))
+                    {
+                        <span class="badge bg-warning text-dark" title="Bloqueado por tentativas de login">
+                            <i class="fa-solid fa-lock"></i> Bloqueado até @usuario.LockoutEnd!.Value.ToLocalTime().ToString("HH:mm")
+                        </span>
+                    }
                 </td>
                 <td class="mono">@(usuario.UltimoLogin?.ToString("dd/MM/yyyy HH:mm") ?? "—")</td>
                 <td class="acoes">
                     <a class="btn-pill" href="@($"usuarios/editar/{usuario.Id}")"><i class="fa-solid fa-pen"></i> Editar</a>
+                    @if (Bloqueado(usuario))
+                    {
+                        <form method="post" action="/api/usuarios/desbloquear" style="display:inline">
+                            <input type="hidden" name="id" value="@usuario.Id" />
+                            <button type="submit" class="btn-pill success"><i class="fa-solid fa-unlock"></i> Desbloquear</button>
+                        </form>
+                    }
                     <form method="post" action="/api/usuarios/alternar-ativo" style="display:inline">
                         <input type="hidden" name="id" value="@usuario.Id" />
                         <button type="submit" class="btn-pill @(usuario.Ativo ? "danger" : "success")">
@@ -117,8 +140,8 @@ else if (Erro == "nao-encontrado")
 </table>
 
 <p class="dash-note">
-    Ver as permissões de cada perfil em <a href="perfis-usuarios">Perfis de usuários</a>.
-    Todas as ações desta tela ficarão registradas em auditoria em uma próxima etapa.
+    As permissões de cada perfil são configuradas em <a href="perfis-usuarios">Perfis de usuários</a>.
+    Alterações de perfil valem em até 30 segundos, sem o usuário precisar sair.
 </p>
 
 @code {
@@ -129,9 +152,13 @@ else if (Erro == "nao-encontrado")
     private string? Erro { get; set; }
 
     private List<AppUser> ListaUsuarios { get; set; } = new();
+    private List<RDSMonitor.Web.Data.Entities.Perfil> Perfis { get; set; } = new();
+
+    private static bool Bloqueado(AppUser u) => u.LockoutEnd is { } fim && fim > DateTime.UtcNow;
 
     protected override async Task OnInitializedAsync()
     {
         ListaUsuarios = await UserService.ListarAsync();
+        Perfis        = await PerfilService.ListarParaSelecaoAsync();
     }
 }

@@ -1,6 +1,6 @@
 @page "/administracao"
 @rendermode InteractiveServer
-@attribute [Authorize(Roles = "Administrador")]
+@attribute [Authorize(Policy = Permissoes.ComandosManuais)]
 @inject IServerService ServerService
 @inject ICommandService CommandService
 @inject AppDbContext Db
@@ -197,10 +197,17 @@ else
         var tipo       = Enum.TryParse<CommandType>(formComando, out var t) ? t : CommandType.Logoff;
         var parametros = MontarParametros(tipo, formParam.Trim());
 
-        var auth     = await AuthState;
-        var operador = auth.User.Identity?.Name ?? "portal";
-
-        await CommandService.CreateAsync(formServerId, tipo, parametros, operador);
+        var auth = await AuthState;
+        try
+        {
+            await CommandService.CreateAsync(formServerId, tipo, parametros, auth.User);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            feedback     = ex.Message;
+            feedbackErro = true;
+            return;
+        }
 
         feedback     = $"Comando \"{formComando}\" enfileirado com sucesso.";
         feedbackErro = false;

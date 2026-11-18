@@ -6,7 +6,7 @@ namespace RDSMonitor.Agent.Services;
 
 /// <summary>
 /// Executa os comandos recebidos da API central usando ferramentas nativas do Windows:
-/// logoff, tsdiscon, taskkill, msg, sc e shutdown.
+/// logoff, tsdiscon, Process.Kill, WTSSendMessage, ServiceController e shutdown.
 /// </summary>
 public class CommandExecutor
 {
@@ -179,47 +179,132 @@ public class CommandExecutor
 
     // ── Send Message ──────────────────────────────────────────────────────────
 
-    private async Task<CommandResult> SendMessageAsync(Dictionary<string, string> p)
+    /// <summary>
+    /// Mostra uma janela de mensagem na sessão do usuário via WTSSendMessage
+    /// (o msg.exe dependia de aspas e do idioma e falhava a partir do serviço).
+    /// </summary>
+    private Task<CommandResult> SendMessageAsync(Dictionary<string, string> p)
     {
-        if (!p.TryGetValue("SessionId", out var sessionId))
-            return Erro("SessionId não informado.");
+        if (!p.TryGetValue("SessionId", out var sessaoTexto) || !int.TryParse(sessaoTexto, out var sessao) || sessao < 0)
+            return Task.FromResult(Erro("SessionId inválido ou não informado."));
 
-        p.TryGetValue("Message", out var message);
-        p.TryGetValue("Title", out var title);
+        p.TryGetValue("Message", out var mensagem);
+        p.TryGetValue("Title", out var titulo);
+        if (string.IsNullOrWhiteSpace(mensagem))
+            return Task.FromResult(Erro("Mensagem vazia."));
 
-        message ??= "Mensagem do administrador.";
-        title   ??= "RDSManager";
+        titulo = string.IsNullOrWhiteSpace(titulo) ? "Mensagem do administrador" : titulo.Trim();
+        var timeout = p.TryGetValue("TimeoutSeconds", out var t) && int.TryParse(t, out var seg) && seg > 0 ? seg : 300;
 
-        // msg <ID> /TIME:30 <MENSAGEM>
-        var args = $"{sessionId} /TIME:30 \"{message}\" /V";
-        return await RunCmdAsync("msg", args);
+        try
+        {
+            WtsSessionApi.EnviarMensagem(sessao, titulo, mensagem.Trim(), timeout);
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            return Task.FromResult(Erro($"Não foi possível enviar a mensagem para a sessão {sessao}: {ex.Message} (código {ex.NativeErrorCode})."));
+        }
+
+        _log.LogInformation("Mensagem enviada para a sessão {Sessao}.", sessao);
+        return Task.FromResult(new CommandResult { Success = true, Output = $"Mensagem exibida na sessão {sessao}." });
     }
 
     // ── Restart Service ───────────────────────────────────────────────────────
 
-    private async Task<CommandResult> RestartServiceAsync(Dictionary<string, string> p)
+    /// <summary>
+    /// Reinicia um serviço do Windows (padrão: TermService). Os serviços que
+    /// dependem dele (ex.: UmRdpService) são parados antes e religados depois —
+    /// o "sc stop" falhava com o erro 1051 justamente por causa deles.
+    /// ATENÇÃO: reiniciar o TermService desconecta todas as sessões RDP.
+    /// </summary>
+    private Task<CommandResult> RestartServiceAsync(Dictionary<string, string> p) => Task.Run(() =>
     {
-        p.TryGetValue("ServiceName", out var serviceName);
-        serviceName ??= "TermService";
+        p.TryGetValue("ServiceName", out var nome);
+        nome = string.IsNullOrWhiteSpace(nome) ? "TermService" : nome.Trim();
+        if (!System.Text.RegularExpressions.Regex.IsMatch(nome, @"^[A-Za-z0-9_.\-]{1,80}$"))
+            return Erro($"Nome de serviço inválido: {nome}");
 
-        var stop   = await RunCmdAsync("sc", $"stop {serviceName}");
-        await Task.Delay(3_000); // aguarda parada
-        var start  = await RunCmdAsync("sc", $"start {serviceName}");
+        using var servico = new System.ServiceProcess.ServiceController(nome);
+        try { _ = servico.Status; }
+        catch (InvalidOperationException) { return Erro($"O serviço \"{nome}\" não existe neste servidor."); }
 
-        return new CommandResult
+        var limite = TimeSpan.FromSeconds(90);
+
+        // Dependentes em execução (recursivo), na ordem pai → filho
+        var dependentes = new List<string>();
+        void Coletar(System.ServiceProcess.ServiceController sc)
         {
-            Success = start.Success,
-            Output  = $"stop: {stop.Output} | start: {start.Output}",
-            Error   = start.Success ? null : start.Error,
-        };
-    }
+            foreach (var d in sc.DependentServices)
+            {
+                using (d)
+                {
+                    if (d.Status != System.ServiceProcess.ServiceControllerStatus.Stopped
+                        && !dependentes.Contains(d.ServiceName, StringComparer.OrdinalIgnoreCase))
+                    {
+                        dependentes.Add(d.ServiceName);
+                        Coletar(d);
+                    }
+                }
+            }
+        }
+        Coletar(servico);
+
+        try
+        {
+            if (servico.Status != System.ServiceProcess.ServiceControllerStatus.Stopped)
+            {
+                _log.LogInformation("Parando {Servico} (dependentes: {Deps})...", nome,
+                    dependentes.Count == 0 ? "nenhum" : string.Join(", ", dependentes));
+                servico.Stop();   // também para os serviços dependentes
+                servico.WaitForStatus(System.ServiceProcess.ServiceControllerStatus.Stopped, limite);
+            }
+
+            servico.Start();
+            servico.WaitForStatus(System.ServiceProcess.ServiceControllerStatus.Running, limite);
+
+            var falharam = new List<string>();
+            foreach (var nomeDep in dependentes)
+            {
+                try
+                {
+                    using var dep = new System.ServiceProcess.ServiceController(nomeDep);
+                    if (dep.Status == System.ServiceProcess.ServiceControllerStatus.Stopped) dep.Start();
+                    dep.WaitForStatus(System.ServiceProcess.ServiceControllerStatus.Running, TimeSpan.FromSeconds(30));
+                }
+                catch (Exception ex)
+                {
+                    _log.LogWarning(ex, "Dependente {Dep} não voltou a rodar.", nomeDep);
+                    falharam.Add(nomeDep);
+                }
+            }
+
+            var deps = dependentes.Count == 0 ? "" : $" Dependentes religados: {string.Join(", ", dependentes.Except(falharam))}.";
+            if (falharam.Count > 0)
+                return new CommandResult
+                {
+                    Success = false,
+                    Output  = $"Serviço \"{nome}\" reiniciado.{deps}",
+                    Error   = $"Serviço \"{nome}\" reiniciado, mas não voltaram a rodar: {string.Join(", ", falharam)}.",
+                };
+
+            _log.LogInformation("Serviço {Servico} reiniciado.", nome);
+            return new CommandResult { Success = true, Output = $"Serviço \"{nome}\" reiniciado.{deps}" };
+        }
+        catch (System.ServiceProcess.TimeoutException)
+        {
+            return Erro($"O serviço \"{nome}\" não mudou de estado em {limite.TotalSeconds:0} segundos (status atual: {servico.Status}).");
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Erro($"Falha ao reiniciar \"{nome}\": {ex.InnerException?.Message ?? ex.Message}");
+        }
+    });
 
     // ── Restart Server ────────────────────────────────────────────────────────
 
     private async Task<CommandResult> RestartServerAsync(Dictionary<string, string> p)
     {
-        p.TryGetValue("DelaySeconds", out var delay);
-        delay ??= "30";
+        var delay = p.TryGetValue("DelaySeconds", out var d) && int.TryParse(d, out var s) ? Math.Clamp(s, 0, 600) : 30;
 
         // shutdown /r /t <segundos> /c "RDSManager: reinício solicitado pelo administrador"
         var args = $"/r /t {delay} /c \"RDSManager: reinicio solicitado pelo portal\"";

@@ -18,6 +18,11 @@ public class AppDbContext : DbContext
     public DbSet<Command>        Commands        => Set<Command>();
     public DbSet<ServerProcess>  Processes       => Set<ServerProcess>();
 
+    // ── Perfis e auditoria ───────────────────────────────────
+    public DbSet<Perfil>         Perfis          => Set<Perfil>();
+    public DbSet<AuditoriaAcao>  Auditoria       => Set<AuditoriaAcao>();
+    public DbSet<AcessoLog>      AcessoLogs      => Set<AcessoLog>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         // ── AppUser ──────────────────────────────────────────
@@ -26,6 +31,48 @@ public class AppDbContext : DbContext
             e.HasIndex(u => u.Username).IsUnique();
             e.Property(u => u.Username).IsRequired().HasMaxLength(100);
             e.Property(u => u.DisplayName).IsRequired().HasMaxLength(150);
+            e.HasOne(u => u.Perfil)
+             .WithMany(p => p.Usuarios)
+             .HasForeignKey(u => u.PerfilId)
+             .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ── Perfil ───────────────────────────────────────────
+        modelBuilder.Entity<Perfil>(e =>
+        {
+            e.ToTable("Perfis");
+            e.HasIndex(p => p.Nome).IsUnique();
+            e.Property(p => p.Nome).IsRequired().HasMaxLength(60);
+            e.Property(p => p.Descricao).HasMaxLength(250);
+            e.Property(p => p.Permissoes).IsRequired().HasDefaultValue("");
+            e.Ignore(p => p.AcessoTotal);
+            e.Ignore(p => p.ListaPermissoes);
+        });
+
+        // ── AuditoriaAcao ────────────────────────────────────
+        modelBuilder.Entity<AuditoriaAcao>(e =>
+        {
+            e.ToTable("Auditoria");
+            e.HasIndex(a => a.DataHora);
+            e.HasIndex(a => a.CommandId);
+            e.Property(a => a.OperadorLogin).IsRequired().HasMaxLength(100);
+            e.Property(a => a.OperadorNome).HasMaxLength(150);
+            e.Property(a => a.OperadorPerfil).HasMaxLength(60);
+            e.Property(a => a.ServidorNome).IsRequired().HasMaxLength(100);
+            e.Property(a => a.UsuarioAlvo).HasMaxLength(150);
+            e.Property(a => a.Processo).HasMaxLength(260);
+            e.Property(a => a.Detalhes).HasMaxLength(1000);
+            e.Property(a => a.Resultado).HasMaxLength(2000);
+        });
+
+        // ── AcessoLog ────────────────────────────────────────
+        modelBuilder.Entity<AcessoLog>(e =>
+        {
+            e.ToTable("AcessoLog");
+            e.HasIndex(a => a.DataHora);
+            e.Property(a => a.Usuario).IsRequired().HasMaxLength(100);
+            e.Property(a => a.Ip).HasMaxLength(64);
+            e.Property(a => a.Detalhe).HasMaxLength(250);
         });
 
         // ── Server ───────────────────────────────────────────

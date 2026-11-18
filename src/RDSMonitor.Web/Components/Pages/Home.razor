@@ -1,6 +1,6 @@
 @page "/"
 @rendermode InteractiveServer
-@attribute [Authorize]
+@attribute [Authorize(Policy = Permissoes.DashboardVer)]
 @inject IServerService ServerService
 @implements IDisposable
 

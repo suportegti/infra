@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="RDSManager">
+  <rect width="32" height="32" rx="7" fill="#182233"/>
+  <g fill="#e8a33d">
+    <rect x="6" y="7"  width="20" height="8" rx="2.2"/>
+    <rect x="6" y="17" width="20" height="8" rx="2.2"/>
+  </g>
+  <g fill="#182233">
+    <circle cx="9.5" cy="11" r="1.35"/>
+    <circle cx="9.5" cy="21" r="1.35"/>
+    <rect x="12.5" y="10.2" width="7" height="1.6" rx="0.8"/>
+    <rect x="12.5" y="20.2" width="7" height="1.6" rx="0.8"/>
+  </g>
+</svg>

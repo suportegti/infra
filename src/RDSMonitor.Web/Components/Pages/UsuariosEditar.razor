@@ -1,6 +1,7 @@
 @page "/usuarios/editar/{Id:int}"
-@attribute [Authorize(Roles = "Administrador")]
+@attribute [Authorize(Policy = Permissoes.UsuariosGerenciar)]
 @inject IUserService UserService
+@inject IPerfilService PerfilService
 
 <PageTitle>Editar Usuário · RDSManager</PageTitle>
 
@@ -20,6 +21,10 @@ else
     @if (Erro == "senha-fraca")
     {
         <div class="login-alert" role="alert">A nova senha deve ter pelo menos 8 caracteres.</div>
+    }
+    else if (Erro == "ultimo-admin")
+    {
+        <div class="login-alert" role="alert">Este é o último administrador ativo: o perfil dele não pode ser trocado.</div>
     }
     else if (Erro == "dados-invalidos")
     {
@@ -41,10 +46,11 @@ else
                 </label>
                 <label class="field">
                     <i class="fa-solid fa-user-shield"></i>
-                    <select name="profile" required>
-                        <option value="Administrador" selected="@(Usuario.Profile == UserProfile.Administrador)">Administrador</option>
-                        <option value="Operador" selected="@(Usuario.Profile == UserProfile.Operador)">Operador</option>
-                        <option value="Auditor" selected="@(Usuario.Profile == UserProfile.Auditor)">Auditor</option>
+                    <select name="perfilId" required>
+                        @foreach (var p in Perfis)
+                        {
+                            <option value="@p.Id" selected="@(Usuario.PerfilId == p.Id)">@p.Nome</option>
+                        }
                     </select>
                 </label>
                 <label class="field">
@@ -69,9 +75,11 @@ else
     private string? Erro { get; set; }
 
     private AppUser? Usuario { get; set; }
+    private List<RDSMonitor.Web.Data.Entities.Perfil> Perfis { get; set; } = new();
 
     protected override async Task OnInitializedAsync()
     {
         Usuario = await UserService.ObterPorIdAsync(Id);
+        Perfis  = await PerfilService.ListarParaSelecaoAsync();
     }
 }

@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>RDSManager</title>
     <base href="/" />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg?v=@VersaoCss" />
+    <link rel="apple-touch-icon" href="favicon.svg" />
     <script>
         // Aplica o tema salvo antes da primeira renderização, para não piscar
         // um tema errado por uma fração de segundo (FOUC).
@@ -16,7 +18,7 @@
     </script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
-    <link rel="stylesheet" href="css/site.css" />
+    <link rel="stylesheet" href="css/site.css?v=@VersaoCss" />
     <HeadOutlet />
 </head>
 <body>
@@ -25,3 +27,12 @@
     <script src="js/site.js"></script>
 </body>
 </html>
+
+@code {
+    [Inject] private IWebHostEnvironment Env { get; set; } = null!;
+
+    // Muda quando o site.css muda, para o navegador não usar a versão antiga em cache após uma atualização.
+    private static string? versaoCss;
+    private string VersaoCss => versaoCss ??=
+        File.GetLastWriteTimeUtc(Path.Combine(Env.WebRootPath, "css", "site.css")).Ticks.ToString("x");
+}

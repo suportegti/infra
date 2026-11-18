@@ -1,6 +1,7 @@
 @page "/relatorios"
-@attribute [Authorize]
-@inject AppDbContext Db
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = Permissoes.RelatoriosVer)]
+@inject IRelatorioService RelatorioService
 
 <PageTitle>Relatórios · RDSManager</PageTitle>
 
@@ -9,21 +10,76 @@
     <p>Histórico e estatísticas de uso dos servidores.</p>
 </div>
 
-<h2 style="font-size:1.1rem;margin-bottom:.75rem;">
-    <i class="fa-solid fa-clock-rotate-left"></i> Histórico de sessões (últimas 100)
+<h2 class="relatorio-titulo">
+    <i class="fa-solid fa-clock-rotate-left"></i> Histórico de sessões
 </h2>
 
-@if (historico.Count == 0)
+<section class="form-panel audit-filtros">
+    <FiltroPeriodo Periodo="periodo" OnAlterado="PesquisarAsync" />
+
+    <div class="form-grid audit-grid">
+        <label class="field-label">
+            <span>Servidor</span>
+            <select @bind="filtro.Servidor" @bind:after="PesquisarAsync">
+                <option value="">Todos</option>
+                @foreach (var sv in servidores) { <option value="@sv">@sv</option> }
+            </select>
+        </label>
+        <label class="field-label">
+            <span>Usuário</span>
+            <input @bind="filtro.Usuario" placeholder="nome do usuário" @onkeydown="EnterAsync" />
+        </label>
+        <label class="field-label">
+            <span>Situação</span>
+            <select @bind="filtro.Situacao" @bind:after="PesquisarAsync">
+                <option value="">Todas</option>
+                <option value="ativas">Ainda conectadas</option>
+                <option value="encerradas">Encerradas</option>
+            </select>
+        </label>
+    </div>
+
+    <div class="form-actions">
+        <button class="btn-pill primary" @onclick="PesquisarAsync"><i class="fa-solid fa-magnifying-glass"></i> Pesquisar</button>
+        <button class="btn-pill" @onclick="LimparAsync"><i class="fa-solid fa-eraser"></i> Limpar filtros</button>
+        <a class="btn-pill" href="@UrlExcel" download><i class="fa-solid fa-file-excel"></i> Exportar Excel</a>
+    </div>
+</section>
+
+<p class="dash-note relatorio-nota">
+    Mostra as sessões que estiveram abertas em algum momento do período, inclusive as que começaram antes dele.
+</p>
+
+@if (!carregando && itens.Count > 0)
 {
-    <p class="dash-note">Nenhum histórico ainda. Os dados aparecerão assim que o agente for instalado.</p>
+    <div class="relatorio-resumo" role="group" aria-label="Resumo do período">
+        <div class="relatorio-kpi"><span>Sessões</span><strong>@resumo.Sessoes</strong></div>
+        <div class="relatorio-kpi"><span>Usuários distintos</span><strong>@resumo.Usuarios</strong></div>
+        <div class="relatorio-kpi"><span>Pico simultâneo</span><strong>@resumo.PicoSimultaneo</strong></div>
+        <div class="relatorio-kpi"><span>Tempo total</span><strong>@Horas(resumo.TempoTotal)</strong></div>
+        <div class="relatorio-kpi"><span>Tempo médio</span><strong>@Horas(resumo.TempoMedio)</strong></div>
+    </div>
 }
-else
+
+<p class="search-summary" role="status">
+    @if (carregando)
+    {
+        <span><i class="fa-solid fa-spinner fa-spin"></i> Pesquisando…</span>
+    }
+    else
+    {
+        <span><strong>@itens.Count</strong> sessão(ões)@(truncado ? $" — exibindo as {filtro.Limite} mais recentes; refine o período ou exporte para o Excel" : "").</span>
+    }
+</p>
+
+@if (itens.Count > 0)
 {
     <table class="data-table">
         <thead>
             <tr>
                 <th>Servidor</th>
                 <th>Usuário</th>
+                <th>Sessão</th>
                 <th>Login</th>
                 <th>Logoff</th>
                 <th>Duração</th>
@@ -31,32 +87,81 @@ else
             </tr>
         </thead>
         <tbody>
-            @foreach (var h in historico)
+            @foreach (var h in itens)
             {
-                var duracao = h.LogoffTime.HasValue
-                    ? h.LogoffTime.Value - h.LogonTime
-                    : DateTime.UtcNow - h.LogonTime;
                 <tr>
                     <td class="mono">@h.ServerName</td>
                     <td>@h.Username</td>
+                    <td class="mono">@h.RdsSessionId</td>
                     <td class="mono">@h.LogonTime.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</td>
                     <td class="mono">@(h.LogoffTime.HasValue ? h.LogoffTime.Value.ToLocalTime().ToString("dd/MM/yyyy HH:mm") : "Ativa")</td>
-                    <td class="mono">@($"{(int)duracao.TotalHours}h {duracao.Minutes:D2}m")</td>
+                    <td class="mono">@Horas(RelatorioService.Duracao(h))</td>
                     <td>@(h.LogoffReason ?? "—") @(h.AdminUsername is not null ? $"({h.AdminUsername})" : "")</td>
                 </tr>
             }
         </tbody>
     </table>
 }
+else if (!carregando)
+{
+    <p class="dash-note">Nenhuma sessão encontrada com esses filtros. Os dados aparecem assim que o agente estiver instalado.</p>
+}
 
 @code {
-    private List<SessionHistory> historico = new();
+    private readonly PeriodoFiltro   periodo = new("7d");
+    private readonly FiltroRelatorio filtro  = new();
+
+    private List<SessionHistory> itens = new();
+    private ResumoRelatorio resumo = new(0, 0, TimeSpan.Zero, TimeSpan.Zero, 0);
+    private bool truncado;
+    private bool carregando;
+    private List<string> servidores = new();
 
     protected override async Task OnInitializedAsync()
     {
-        historico = await Db.SessionHistories
-            .OrderByDescending(h => h.LogonTime)
-            .Take(100)
-            .ToListAsync();
+        servidores = await RelatorioService.ListarServidoresAsync();
+        await PesquisarAsync();
     }
+
+    private async Task PesquisarAsync()
+    {
+        if (periodo.Invalido) return;
+        filtro.DeLocal  = periodo.DeLocal;
+        filtro.AteLocal = periodo.AteLocal;
+
+        carregando = true;
+        StateHasChanged();
+        (itens, truncado) = await RelatorioService.PesquisarHistoricoAsync(filtro);
+        resumo = RelatorioService.Resumir(itens);
+        carregando = false;
+    }
+
+    private async Task LimparAsync()
+    {
+        filtro.Servidor = filtro.Usuario = filtro.Situacao = null;
+        periodo.Aplicar("7d");
+        await PesquisarAsync();
+    }
+
+    private async Task EnterAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await PesquisarAsync();
+    }
+
+    private string UrlExcel
+    {
+        get
+        {
+            var q = new List<string>();
+            void Add(string k, string? v) { if (!string.IsNullOrWhiteSpace(v)) q.Add($"{k}={Uri.EscapeDataString(v)}"); }
+            Add("de",       PeriodoFiltro.ParaUrl(periodo.DeLocal));
+            Add("ate",      PeriodoFiltro.ParaUrl(periodo.AteLocal));
+            Add("servidor", filtro.Servidor);
+            Add("usuario",  filtro.Usuario);
+            Add("situacao", filtro.Situacao);
+            return "/api/relatorios/sessoes.xlsx" + (q.Count > 0 ? "?" + string.Join("&", q) : "");
+        }
+    }
+
+    private static string Horas(TimeSpan d) => $"{(int)d.TotalHours}h {d.Minutes:D2}m";
 }

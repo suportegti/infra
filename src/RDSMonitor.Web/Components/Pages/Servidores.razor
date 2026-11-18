@@ -1,8 +1,9 @@
 @page "/servidores"
 @rendermode InteractiveServer
-@attribute [Authorize(Roles = "Administrador,Operador")]
+@attribute [Authorize(Policy = Permissoes.ServidoresVer)]
 @inject IServerService ServerService
 @inject ICommandService CommandService
+@inject IPermissaoService PermissaoService
 @implements IDisposable
 
 <PageTitle>Servidores · RDSManager</PageTitle>
@@ -19,7 +20,7 @@
     <div class="login-alert @(mensagemErro ? "" : "login-alert-success")" role="alert">@mensagem</div>
 }
 
-<AuthorizeView Roles="Administrador">
+<AuthorizeView Policy="@Permissoes.ServidoresGerenciar">
     <Authorized>
         <details class="form-card" open="@novoAberto">
             <summary @onclick="() => novoAberto = !novoAberto" @onclick:preventDefault>
@@ -60,7 +61,7 @@
             <th>CPU</th>
             <th>RAM usada / total</th>
             <th>Último heartbeat</th>
-            @if (ehAdmin) { <th>Ações</th> }
+            @if (podeGerenciar || podeReiniciar) { <th>Ações</th> }
         </tr>
     </thead>
     <tbody>
@@ -114,7 +115,7 @@
                         ? sv.LastHeartbeat.Value.ToLocalTime().ToString("dd/MM HH:mm:ss")
                         : "Nunca")
                 </td>
-                @if (ehAdmin)
+                @if (podeGerenciar || podeReiniciar)
                 {
                     <td class="acoes">
                         @if (emEdicao)
@@ -124,11 +125,16 @@
                         }
                         else
                         {
+                            @if (podeGerenciar)
+                            {
                             <button class="btn-acao" @onclick="() => IniciarEdicao(sv)">Editar</button>
                             <button class="btn-acao" @onclick="() => AlternarHabilitadoAsync(sv)">
                                 @(sv.IsEnabled ? "Desabilitar" : "Habilitar")
                             </button>
                             <button class="btn-acao danger" @onclick="() => ExcluirAsync(sv)">Excluir</button>
+                            }
+                            @if (podeReiniciar)
+                            {
                             <button class="btn-acao"
                                     disabled="@(!sv.IsOnline)"
                                     title="@(!sv.IsOnline ? "Servidor offline" : "Reiniciar o serviço de sessão (TermService)")"
@@ -141,6 +147,7 @@
                                     @onclick="() => ReiniciarServidorAsync(sv)">
                                 Reiniciar servidor
                             </button>
+                            }
                         }
                     </td>
                 }
@@ -163,8 +170,8 @@
     private List<Server> servidores = new();
     private string? mensagem;
     private bool    mensagemErro;
-    private bool    ehAdmin;
-    private string  operador = "portal";
+    private System.Security.Claims.ClaimsPrincipal usuario = new();
+    private bool    podeGerenciar, podeReiniciar;
 
     private bool    novoAberto;
     private string  novoNome    = string.Empty;
@@ -178,9 +185,7 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var auth = await AuthState;
-        ehAdmin  = auth.User.IsInRole("Administrador");
-        operador = auth.User.Identity?.Name ?? "portal";
+        usuario = (await AuthState).User;
 
         await CarregarAsync();
 
@@ -196,12 +201,18 @@
     }
 
     private async Task CarregarAsync()
-        => servidores = await ServerService.GetAllWithSessionsAsync(incluirDesabilitados: true);
+    {
+        var p = await PermissaoService.DoUsuarioAsync(usuario);
+        podeGerenciar = p.Contains(Permissoes.ServidoresGerenciar);
+        podeReiniciar = p.Contains(Permissoes.ServidoresReiniciar);
+        servidores = await ServerService.GetAllWithSessionsAsync(incluirDesabilitados: true);
+    }
 
     // ── Cadastro ─────────────────────────────────────────────
 
     private async Task CriarAsync()
     {
+        if (!await PodeGerenciarAgoraAsync()) return;
         var nome = novoNome.Trim();
         var r = await ServerService.CreateAsync(nome, novoDisplay);
         if (r == ServerOperationResult.Sucesso)
@@ -225,6 +236,7 @@
 
     private async Task SalvarEdicaoAsync(int id)
     {
+        if (!await PodeGerenciarAgoraAsync()) return;
         var r = await ServerService.UpdateAsync(id, editNome, editDisplay);
         if (r == ServerOperationResult.Sucesso) editandoId = null;
         Avisar(r, $"Servidor {editNome.Trim()} atualizado. Se o nome mudou, ajuste também o ServerName no agente.");
@@ -233,6 +245,7 @@
 
     private async Task AlternarHabilitadoAsync(Server sv)
     {
+        if (!await PodeGerenciarAgoraAsync()) return;
         if (sv.IsEnabled &&
             !await confirmacao.PerguntarAsync(
                 "Desabilitar servidor?",
@@ -249,6 +262,7 @@
 
     private async Task ExcluirAsync(Server sv)
     {
+        if (!await PodeGerenciarAgoraAsync()) return;
         if (!await confirmacao.PerguntarAsync(
                 "Excluir servidor definitivamente?",
                 "Sessões, processos e comandos deste servidor serão apagados (o histórico de sessões é mantido). Esta ação não pode ser desfeita.\nPara só pausar o monitoramento, use Desabilitar.",
@@ -268,14 +282,15 @@
     {
         if (!await confirmacao.PerguntarAsync(
                 "Reiniciar o serviço de sessões?",
-                "O serviço TermService será reiniciado. As sessões conectadas podem cair.",
+                "O serviço de Área de Trabalho Remota (TermService) e os serviços que dependem dele serão reiniciados. TODAS as sessões RDP conectadas neste servidor serão desconectadas (os programas continuam abertos e o usuário pode reconectar).",
                 "Reiniciar serviço",
                 perigo: true,
                 detalhes: DetalhesServidor(sv)))
             return;
 
-        await CommandService.CreateAsync(sv.Id, CommandType.RestartService,
-            new Dictionary<string, string> { { "ServiceName", "TermService" } }, operador);
+        if (!await CriarComandoAsync(sv.Id, CommandType.RestartService,
+                new Dictionary<string, string> { { "ServiceName", "TermService" } }))
+            return;
         Avisar(ServerOperationResult.Sucesso, $"Comando de reinício de serviço enfileirado para {sv.Name}.");
     }
 
@@ -289,9 +304,34 @@
                 detalhes: DetalhesServidor(sv)))
             return;
 
-        await CommandService.CreateAsync(sv.Id, CommandType.RestartServer,
-            new Dictionary<string, string> { { "DelaySeconds", "10" } }, operador);
+        if (!await CriarComandoAsync(sv.Id, CommandType.RestartServer,
+                new Dictionary<string, string> { { "DelaySeconds", "10" } }))
+            return;
         Avisar(ServerOperationResult.Sucesso, $"Comando de reinício enfileirado para {sv.Name}. O servidor será reiniciado em 10 segundos.");
+    }
+
+    private async Task<bool> CriarComandoAsync(int serverId, CommandType tipo, Dictionary<string, string> parametros)
+    {
+        try
+        {
+            await CommandService.CreateAsync(serverId, tipo, parametros, usuario);
+            return true;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            mensagemErro = true;
+            mensagem     = ex.Message;
+            return false;
+        }
+    }
+
+    /// <summary>Confere no servidor a permissão de gerenciar antes de alterar o cadastro.</summary>
+    private async Task<bool> PodeGerenciarAgoraAsync()
+    {
+        if (await PermissaoService.PossuiAsync(usuario, Permissoes.ServidoresGerenciar)) return true;
+        mensagemErro = true;
+        mensagem     = "Seu perfil não tem a permissão \"Gerenciar servidores\".";
+        return false;
     }
 
     private static IReadOnlyList<(string, string)> DetalhesServidor(Server sv) => new[]

@@ -20,6 +20,10 @@ public class Worker : BackgroundService
     private readonly SimulatedSessionStore _simulacao;
     private readonly ILogger<Worker>     _log;
 
+    // Evita que o heartbeat periódico e o heartbeat imediato (pós-comando)
+    // sejam montados/enviados ao mesmo tempo.
+    private readonly SemaphoreSlim _heartbeatGate = new(1, 1);
+
     public Worker(
         AgentSettings    settings,
         SessionCollector sessions,
@@ -65,6 +69,7 @@ public class Worker : BackgroundService
 
     private async Task SendHeartbeatAsync(CancellationToken ct)
     {
+        await _heartbeatGate.WaitAsync(ct);
         try
         {
             var (usedGb, totalGb) = ProcessCollector.GetMemoryInfo();
@@ -112,6 +117,10 @@ public class Worker : BackgroundService
         {
             _log.LogError(ex, "Erro no loop de heartbeat.");
         }
+        finally
+        {
+            _heartbeatGate.Release();
+        }
     }
 
     // ── Loop de Comandos ──────────────────────────────────────────────────────
@@ -131,13 +140,20 @@ public class Worker : BackgroundService
         {
             var commands = await _api.GetPendingCommandsAsync(ct);
 
+            var executou = false;
             foreach (var cmd in commands)
             {
                 if (ct.IsCancellationRequested) break;
 
                 var result = await _executor.ExecuteAsync(cmd);
                 await _api.ReportCommandResultAsync(cmd.Id, result, ct);
+                executou = true;
             }
+
+            // Reflete o resultado (sessão encerrada, processo derrubado, etc.) na
+            // tela imediatamente, sem aguardar o próximo heartbeat periódico.
+            if (executou && !ct.IsCancellationRequested)
+                await SendHeartbeatAsync(ct);
         }
         catch (OperationCanceledException) { /* serviço encerrando */ }
         catch (Exception ex)

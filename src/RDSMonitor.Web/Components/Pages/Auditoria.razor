@@ -1,0 +1,285 @@
+@page "/auditoria"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = Permissoes.AuditoriaVer)]
+@inject IAuditoriaService AuditoriaService
+@inject IServerService ServerService
+
+<PageTitle>Auditoria · RDSManager</PageTitle>
+
+<div class="dash-header">
+    <h1>Auditoria</h1>
+    <p>Ações executadas pelos operadores: quem fez, quando, em qual servidor/usuário e o resultado devolvido pelo agente.</p>
+</div>
+
+<section class="form-panel audit-filtros">
+    <FiltroPeriodo Periodo="periodo" OnAlterado="PesquisarAsync" />
+
+    <div class="form-grid audit-grid">
+        <label class="field-label">
+            <span>Ação</span>
+            <select @bind="acaoTexto" @bind:after="PesquisarAsync">
+                <option value="">Todas</option>
+                @foreach (var a in Enum.GetValues<CommandType>())
+                {
+                    <option value="@a">@NomeAcao(a)</option>
+                }
+            </select>
+        </label>
+        <label class="field-label">
+            <span>Resultado</span>
+            <select @bind="statusTexto" @bind:after="PesquisarAsync">
+                <option value="">Todos</option>
+                <option value="@CommandStatus.Completed">Concluído</option>
+                <option value="@CommandStatus.Failed">Falhou</option>
+                <option value="@CommandStatus.Pending">Aguardando agente</option>
+                <option value="@CommandStatus.Executing">Em execução</option>
+            </select>
+        </label>
+        <label class="field-label">
+            <span>Operador</span>
+            <input @bind="filtro.Operador" list="audit-operadores" placeholder="login ou nome" />
+            <datalist id="audit-operadores">
+                @foreach (var o in operadores) { <option value="@o"></option> }
+            </datalist>
+        </label>
+        <label class="field-label">
+            <span>Servidor</span>
+            <select @bind="filtro.Servidor" @bind:after="PesquisarAsync">
+                <option value="">Todos</option>
+                @foreach (var sv in servidores) { <option value="@sv">@sv</option> }
+            </select>
+        </label>
+        <label class="field-label">
+            <span>Alvo</span>
+            <input @bind="filtro.Alvo" placeholder="usuário, processo, PID ou sessão" @onkeydown="EnterAsync" />
+        </label>
+    </div>
+
+    <div class="form-actions">
+        <button class="btn-pill primary" @onclick="PesquisarAsync"><i class="fa-solid fa-magnifying-glass"></i> Pesquisar</button>
+        <button class="btn-pill" @onclick="LimparAsync"><i class="fa-solid fa-eraser"></i> Limpar filtros</button>
+        <a class="btn-pill" href="@Url("xlsx")" download><i class="fa-solid fa-file-excel"></i> Exportar Excel</a>
+        <a class="btn-pill" href="@Url("csv")" download><i class="fa-solid fa-file-csv"></i> Exportar CSV</a>
+    </div>
+</section>
+
+<p class="search-summary" role="status">
+    @if (carregando)
+    {
+        <span><i class="fa-solid fa-spinner fa-spin"></i> Pesquisando…</span>
+    }
+    else
+    {
+        <span><strong>@itens.Count</strong> registro(s)@(truncado ? $" — exibindo os {filtro.Limite} mais recentes; refine o período ou exporte o CSV" : "").</span>
+    }
+</p>
+
+@if (itens.Count > 0)
+{
+    <table class="data-table audit-table">
+        <thead>
+            <tr>
+                <th>Data/hora</th>
+                <th>Operador</th>
+                <th>Ação</th>
+                <th>Servidor</th>
+                <th>Alvo</th>
+                <th>Detalhes</th>
+                <th>Resultado</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var a in itens)
+            {
+                <tr>
+                    <td class="mono">@a.DataHora.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss")</td>
+                    <td>
+                        @(a.OperadorNome ?? a.OperadorLogin)
+                        <span class="sub-label">@a.OperadorLogin@(a.OperadorPerfil is null ? "" : $" · {a.OperadorPerfil}")</span>
+                    </td>
+                    <td><span class="badge-acao acao-@a.Acao.ToString().ToLower()">@NomeAcao(a.Acao)</span></td>
+                    <td class="mono">@a.ServidorNome</td>
+                    <td>
+                        @if (a.UsuarioAlvo is not null) { <span>@a.UsuarioAlvo</span> }
+                        @if (a.SessaoId is not null) { <span class="sub-label">sessão @a.SessaoId</span> }
+                        @if (a.Processo is not null || a.Pid is not null)
+                        {
+                            <span class="sub-label mono">@a.Processo @(a.Pid is null ? "" : $"(PID {a.Pid})")</span>
+                        }
+                        @if (a.UsuarioAlvo is null && a.SessaoId is null && a.Processo is null && a.Pid is null) { <span>—</span> }
+                    </td>
+                    <td class="audit-detalhes" title="@a.Detalhes">@(a.Detalhes ?? "—")</td>
+                    <td>
+                        <span class="status-dot @StatusCss(a.Status)"></span>
+                        @NomeStatus(a.Status)
+                        @if (a.ConcluidoEm is { } fim)
+                        {
+                            <span class="sub-label mono">@fim.ToLocalTime().ToString("HH:mm:ss")</span>
+                        }
+                        @if (!string.IsNullOrEmpty(a.Resultado))
+                        {
+                            <span class="sub-label audit-resultado" title="@a.Resultado">@a.Resultado</span>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+else if (!carregando)
+{
+    <p class="dash-note">Nenhuma ação registrada com esses filtros.</p>
+}
+
+<details class="form-card audit-acessos" open="@acessosAberto">
+    <summary @onclick="() => acessosAberto = !acessosAberto" @onclick:preventDefault>
+        <span><i class="fa-solid fa-right-to-bracket"></i> Tentativas de acesso (login) no período</span>
+        <i class="fa-solid fa-chevron-down chevron"></i>
+    </summary>
+    <div class="form-body">
+        <p class="search-summary" role="status">
+            <span><strong>@acessos.Count</strong> tentativa(s)@(acessosTruncado ? " — exibindo as mais recentes" : "").
+            @if (falhasRecentes > 0) { <text>@falhasRecentes falha(s).</text> }</span>
+        </p>
+        @if (acessos.Count > 0)
+        {
+            <table class="data-table audit-table">
+                <thead>
+                    <tr><th>Data/hora</th><th>Usuário</th><th>Origem (IP)</th><th>Resultado</th><th>Detalhe</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var a in acessos)
+                    {
+                        <tr>
+                            <td class="mono">@a.DataHora.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss")</td>
+                            <td>@a.Usuario</td>
+                            <td class="mono">@(a.Ip ?? "—")</td>
+                            <td>
+                                <span class="status-dot @AcessoCss(a.Resultado)"></span>
+                                @NomeAcesso(a.Resultado)
+                            </td>
+                            <td class="audit-detalhes" title="@a.Detalhe">@(a.Detalhe ?? "—")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+        else
+        {
+            <p class="dash-note">Nenhuma tentativa de acesso registrada no período.</p>
+        }
+    </div>
+</details>
+
+@code {
+    private readonly FiltroAuditoria filtro = new();
+    private readonly PeriodoFiltro periodo = new("7d");
+    private string  acaoTexto   = string.Empty;
+    private string  statusTexto = string.Empty;
+
+    private List<AuditoriaAcao> itens = new();
+    private bool truncado;
+    private bool carregando;
+
+    private List<string> operadores = new();
+    private List<string> servidores = new();
+
+    private List<AcessoLog> acessos = new();
+    private bool acessosTruncado;
+    private bool acessosAberto;
+    private int  falhasRecentes;
+
+    protected override async Task OnInitializedAsync()
+    {
+        operadores = await AuditoriaService.ListarOperadoresAsync();
+        servidores = (await ServerService.GetAllWithSessionsAsync(incluirDesabilitados: true))
+            .Select(s => s.Name).OrderBy(n => n).ToList();
+        await PesquisarAsync();
+    }
+
+    private async Task PesquisarAsync()
+    {
+        if (periodo.Invalido) return;
+        filtro.DeLocal  = periodo.DeLocal;
+        filtro.AteLocal = periodo.AteLocal;
+        filtro.Acao   = Enum.TryParse<CommandType>(acaoTexto, out var a) ? a : null;
+        filtro.Status = Enum.TryParse<CommandStatus>(statusTexto, out var s) ? s : null;
+
+        carregando = true;
+        StateHasChanged();
+        (itens, truncado) = await AuditoriaService.PesquisarAsync(filtro);
+        (acessos, acessosTruncado) = await AuditoriaService.PesquisarAcessosAsync(periodo.DeLocal, periodo.AteLocal);
+        falhasRecentes = acessos.Count(a => a.Resultado != AcessoResultado.Sucesso);
+        carregando = false;
+    }
+
+    private static string NomeAcesso(AcessoResultado r) => r switch
+    {
+        AcessoResultado.Sucesso             => "Sucesso",
+        AcessoResultado.SenhaIncorreta      => "Senha incorreta",
+        AcessoResultado.UsuarioDesconhecido => "Usuário inexistente",
+        AcessoResultado.UsuarioDesabilitado => "Usuário desabilitado",
+        AcessoResultado.Bloqueado           => "Bloqueado",
+        AcessoResultado.LimiteDeTaxa        => "Limite por IP",
+        _                                   => r.ToString(),
+    };
+
+    private static string AcessoCss(AcessoResultado r) =>
+        r == AcessoResultado.Sucesso ? "active" : "disconnected";
+
+    private async Task LimparAsync()
+    {
+        filtro.Operador = filtro.Servidor = filtro.Alvo = null;
+        acaoTexto = statusTexto = string.Empty;
+        periodo.Aplicar("7d");
+        await PesquisarAsync();
+    }
+
+    private async Task EnterAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await PesquisarAsync();
+    }
+
+    private string Url(string formato)
+    {
+        {
+            var q = new List<string>();
+            void Add(string k, string? v) { if (!string.IsNullOrWhiteSpace(v)) q.Add($"{k}={Uri.EscapeDataString(v)}"); }
+            Add("de",       PeriodoFiltro.ParaUrl(periodo.DeLocal));
+            Add("ate",      PeriodoFiltro.ParaUrl(periodo.AteLocal));
+            Add("acao",     acaoTexto);
+            Add("status",   statusTexto);
+            Add("operador", filtro.Operador);
+            Add("servidor", filtro.Servidor);
+            Add("alvo",     filtro.Alvo);
+            return $"/api/auditoria/{formato}" + (q.Count > 0 ? "?" + string.Join("&", q) : "");
+        }
+    }
+
+    public static string NomeAcao(CommandType a) => a switch
+    {
+        CommandType.Logoff         => "Logoff",
+        CommandType.Disconnect     => "Desconectar",
+        CommandType.KillProcess    => "Derrubar processo",
+        CommandType.SendMessage    => "Mensagem",
+        CommandType.RestartService => "Reiniciar serviço",
+        CommandType.RestartServer  => "Reiniciar servidor",
+        _                          => a.ToString(),
+    };
+
+    private static string NomeStatus(CommandStatus s) => s switch
+    {
+        CommandStatus.Pending   => "Aguardando agente",
+        CommandStatus.Executing => "Em execução",
+        CommandStatus.Completed => "Concluído",
+        CommandStatus.Failed    => "Falhou",
+        _                       => s.ToString(),
+    };
+
+    private static string StatusCss(CommandStatus s) => s switch
+    {
+        CommandStatus.Completed => "active",
+        CommandStatus.Failed    => "disconnected",
+        _                       => "idle",
+    };
+}

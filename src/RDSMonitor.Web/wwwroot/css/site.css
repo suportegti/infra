@@ -1331,3 +1331,180 @@ mark.hl {
     color: var(--accent);
     vertical-align: middle;
 }
+
+/* ===================== Mensagem (modal com texto) ===================== */
+.rds-modal-text {
+    width: 100%;
+    min-height: 6rem;
+    resize: vertical;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.7rem 0.8rem;
+    font: inherit;
+    margin-bottom: 1rem;
+}
+.rds-modal-text:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+    border-color: var(--accent);
+}
+
+/* ===================== Perfis de usuários ===================== */
+.perfis-layout {
+    display: grid;
+    grid-template-columns: minmax(240px, 320px) 1fr;
+    gap: 1.25rem;
+    align-items: start;
+    margin-top: 1rem;
+}
+@media (max-width: 900px) {
+    .perfis-layout { grid-template-columns: 1fr; }
+}
+.perfis-lista { display: flex; flex-direction: column; gap: 0.6rem; }
+.perfil-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    text-align: left;
+    width: 100%;
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.85rem 1rem;
+    cursor: pointer;
+    font: inherit;
+}
+.perfil-card:hover { border-color: var(--accent); }
+.perfil-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.perfil-card.selected { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.perfil-card-nome { font-family: var(--font-display); font-weight: 600; }
+.perfil-card-desc { font-size: 0.82rem; color: var(--text-muted); }
+.perfil-card-meta { display: flex; gap: 1rem; font-size: 0.75rem; color: var(--text-muted); }
+.badge-sistema {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 0.1rem 0.4rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    margin-left: 0.35rem;
+    vertical-align: middle;
+}
+.perfil-editor { max-width: none; }
+.perfil-editor-head h2 { font-size: 1.1rem; margin: 0 0 0.3rem; }
+.perfil-editor-head .sub-label { display: block; margin: 0 0 0.6rem; }
+.perm-grupos {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 0.9rem;
+    margin-bottom: 1rem;
+}
+.perm-grupo {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.6rem 0.9rem 0.8rem;
+    margin: 0;
+    min-width: 0;
+}
+.perm-grupo legend {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    padding: 0 0.3rem;
+    width: auto;
+    float: none;
+    margin: 0;
+}
+.perm-grupo[disabled] { opacity: 0.7; }
+.perm-item {
+    display: flex;
+    gap: 0.6rem;
+    align-items: flex-start;
+    padding: 0.4rem 0;
+    cursor: pointer;
+}
+.perm-item input { margin-top: 0.2rem; accent-color: var(--accent); width: 1rem; height: 1rem; flex: none; }
+.perm-item span { display: flex; flex-direction: column; }
+.perm-item strong { font-weight: 600; font-size: 0.9rem; }
+.perm-item small { color: var(--text-muted); font-size: 0.78rem; }
+.perm-aviso { display: block; margin: 0 0 1rem; color: var(--status-idle); }
+
+/* ===================== Auditoria ===================== */
+.audit-filtros { max-width: none; margin-bottom: 1rem; }
+.audit-rapidos { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-bottom: 0.9rem; }
+.audit-rapidos .sub-label { margin: 0 0.3rem 0 0; }
+.audit-grid { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.field-label { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.78rem; color: var(--text-muted); }
+.field-label input,
+.field-label select {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.55rem 0.7rem;
+    color: var(--text);
+    font: inherit;
+    font-size: 0.9rem;
+    color-scheme: dark;
+}
+:root[data-theme="light"] .field-label input,
+:root[data-theme="light"] .field-label select { color-scheme: light; }
+.field-label input:focus-visible,
+.field-label select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+.audit-table td { vertical-align: top; }
+.audit-table .sub-label { display: block; margin: 0.1rem 0 0; }
+.audit-detalhes { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.audit-resultado { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badge-acao {
+    display: inline-block;
+    font-size: 0.75rem;
+    padding: 0.15rem 0.55rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    white-space: nowrap;
+}
+.badge-acao.acao-logoff,
+.badge-acao.acao-killprocess,
+.badge-acao.acao-restartserver { border-color: var(--status-alert); color: var(--status-alert); }
+.badge-acao.acao-disconnect,
+.badge-acao.acao-restartservice { border-color: var(--status-idle); color: var(--status-idle); }
+.badge-acao.acao-sendmessage { border-color: var(--status-active); color: var(--status-active); }
+
+/* ── Seletor de período (data + hora) ───────────────────────────────────── */
+.periodo-campos { display: flex; flex-wrap: wrap; gap: 0.9rem; margin-bottom: 0.35rem; }
+.periodo-par { border: 0; margin: 0; padding: 0; min-width: 0; }
+.periodo-par legend { font-size: 0.78rem; color: var(--text-muted); padding: 0; margin-bottom: 0.3rem; }
+.periodo-inputs { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.periodo-inputs input {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.55rem 0.7rem;
+    color: var(--text);
+    font: inherit;
+    color-scheme: dark;
+}
+:root[data-theme="light"] .periodo-inputs input { color-scheme: light; }
+.periodo-inputs input[type="date"] { min-width: 150px; }
+.periodo-inputs input[type="time"] { min-width: 110px; }
+.periodo-inputs input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+.periodo-ajuda { margin: 0 0 0.9rem; }
+.periodo-erro { color: var(--status-alert); }
+
+/* ── Relatórios ─────────────────────────────────────────────────────────── */
+.relatorio-titulo { font-size: 1.1rem; margin-bottom: 0.75rem; }
+.relatorio-nota { margin: 0 0 0.75rem; }
+.relatorio-resumo { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.6rem; margin-bottom: 0.75rem; }
+.relatorio-kpi {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.6rem 0.8rem;
+    display: flex; flex-direction: column; gap: 0.15rem;
+}
+.relatorio-kpi span { font-size: 0.75rem; color: var(--text-muted); }
+.relatorio-kpi strong { font-size: 1.15rem; font-variant-numeric: tabular-nums; }

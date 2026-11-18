@@ -22,6 +22,18 @@
                 Usuário ou senha inválidos.
             </div>
         }
+        else if (Erro == "bloqueio")
+        {
+            <div class="login-alert" role="alert">
+                Muitas tentativas sem sucesso. Conta bloqueada temporariamente@(MinutosBloqueio is { } m ? $" por {m} minuto(s)" : ""). Tente novamente mais tarde.
+            </div>
+        }
+        else if (Erro == "limite")
+        {
+            <div class="login-alert" role="alert">
+                Muitas tentativas de login a partir deste endereço. Aguarde um minuto e tente de novo.
+            </div>
+        }
 
         <form method="post" action="/api/auth/login">
             <input type="hidden" name="returnUrl" value="@ReturnUrl" />
@@ -51,9 +63,8 @@
 
         <p class="login-hint">
             Acesso via Active Directory / Entra ID será habilitado em uma
-            próxima etapa. Por enquanto, utilize um dos usuários de
-            demonstração informados pela equipe de TI (perfis Administrador,
-            Operador e Auditor).
+            próxima etapa. Por enquanto, utilize as credenciais informadas pela
+            equipe de TI.
         </p>
     </div>
 
@@ -69,4 +80,7 @@
 
     [SupplyParameterFromQuery(Name = "erro")]
     private string? Erro { get; set; }
+
+    [SupplyParameterFromQuery(Name = "min")]
+    private int? MinutosBloqueio { get; set; }
 }

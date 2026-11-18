@@ -55,18 +55,29 @@ dotnet run
 ```
 
 O banco SQLite (`rdsmonitor.db`) é criado automaticamente na primeira
-execução, já com um usuário de cada perfil.
+execução, com os perfis padrão (Administrador, Operador, Auditor) e um único
+usuário, o `admin`. Em Development vêm também cinco servidores de exemplo.
 
-## Usuários de demonstração
+## Implantação em servidores (serviços do Windows)
 
-| Usuário    | Senha      | Perfil        |
-|------------|------------|---------------|
-| `admin`    | `Rds@1234` | Administrador |
-| `operador` | `Rds@1234` | Operador      |
-| `auditor`  | `Rds@1234` | Auditor       |
+Para instalar o portal e os agentes em Windows Server, veja
+[docs/IMPLANTACAO.md](docs/IMPLANTACAO.md). Em resumo:
 
-Troque ou remova esses usuários antes de qualquer uso fora do ambiente de
-desenvolvimento.
+```powershell
+.\deploy\build-pacotes.ps1 -Versao 1.4.0     # gera dist\RDSMonitor.Web-*.zip e dist\RDSMonitor.Agent-*.zip
+# no servidor do portal:      .\install-web.ps1 -SenhaAdmin "..."
+# em cada servidor RDS:       .\install-agent.ps1 -ServidorWeb <ip-ou-dns> -ApiKey "..."
+```
+
+## Usuário inicial
+
+| Usuário | Senha      | Perfil        |
+|---------|------------|---------------|
+| `admin` | `Rds@1234` | Administrador |
+
+Operador e Auditor são **perfis**, não usuários: crie os usuários nominais em
+**Usuários do sistema** e escolha o perfil de cada um. Troque a senha do
+`admin` antes de qualquer uso fora do ambiente de desenvolvimento.
 
 ## Esqueci a senha do admin — como resetar
 
@@ -118,22 +129,45 @@ do painel:
   ele esquecer e não tiver mais acesso).
 - **Desabilitar/Habilitar**: um clique alterna o campo `Ativo` do usuário —
   usuário desabilitado não consegue mais fazer login (a validação já
-  filtra por `Ativo` em `ValidarCredenciaisAsync`). Não existe exclusão
-  definitiva por enquanto, só desabilitar, para preservar o histórico.
+  filtra por `Ativo` em `ValidarCredenciaisAsync`). Usuários **nunca são
+  excluídos**, só desabilitados, para preservar o histórico (auditoria e
+  logoffs feitos por eles). O banco também barra exclusões com um gatilho
+  (`TR_Users_SemExclusao`), mesmo que alguém tente apagar por fora do portal.
 
 A tabela de permissões que antes ficava nessa tela virou uma página própria,
 só de referência: **Perfis de usuários** (`/perfis-usuarios`), com a mesma
 lista de permissões por perfil (Administrador, Operador, Auditor).
 
-## O que cada perfil vê
+## Perfis e permissões
 
-- **Administrador**: todas as telas, incluindo Administração, Usuários do
-  sistema (incluir/editar/desabilitar) e Perfis de usuários; é o único que
-  veria os botões de ação (Logoff, Disconnect, Matar processo, Mensagem)
-  habilitados na tela de Sessões.
-- **Operador**: Dashboard, Sessões, Servidores e Relatórios — somente
+As permissões são configuráveis por perfil em **Administração > Perfis de
+usuários** (catálogo em `src/RDSMonitor.Web/Security/Permissoes.cs`). Padrões:
+
+- **Administrador**: acesso total, sempre (não editável).
+- **Operador**: Dashboard, Sessões, processos, Servidores e Relatórios, somente
   visualização.
-- **Auditor**: Dashboard, Sessões e Relatórios — somente consulta.
+- **Auditor**: Dashboard, Sessões, Relatórios e Auditoria, somente consulta.
+
+Perfis novos podem ser criados com qualquer combinação. Toda ação dos operadores
+(logoff, desconectar, derrubar processo, mensagem, reinícios) fica registrada em
+**Auditoria**, com pesquisa por data/hora e exportação para Excel (.xlsx) ou CSV.
+
+## Segurança do login
+
+O login é protegido contra força bruta: a conta é bloqueada por 15 minutos após
+5 senhas erradas seguidas, e cada IP tem limite de 10 tentativas por minuto.
+Todas as tentativas (sucesso e falha, com usuário e IP) ficam em
+**Auditoria > Tentativas de acesso**. Troque a senha padrão do `admin`
+(`Rds@1234`) antes de qualquer uso real — ela é pública neste repositório.
+
+## Relatórios
+
+A tela **Relatórios** mostra o histórico de sessões filtrado por período (data e
+hora de início e fim, com atalhos: última hora, hoje, ontem, 7 e 30 dias),
+servidor, usuário e situação. Entram as sessões que estiveram abertas em algum
+momento do período. O resumo traz total de sessões, usuários distintos, pico de
+sessões simultâneas e tempo total/médio, e o botão **Exportar Excel** gera um
+.xlsx com os mesmos filtros.
 
 ## O que ainda é mock nesta versão
 

@@ -24,8 +24,19 @@ public class AgentSettings
     /// <summary>Intervalo de envio do heartbeat em segundos. Padrão: 30.</summary>
     public int HeartbeatIntervalSeconds { get; set; } = 30;
 
-    /// <summary>Intervalo de busca de comandos pendentes em segundos. Padrão: 10.</summary>
-    public int CommandPollIntervalSeconds { get; set; } = 10;
+    /// <summary>
+    /// Intervalo de busca de comandos pendentes em segundos. Padrão: 3 — quanto
+    /// menor, mais rápido o agente executa logoff/derrubar etc. Além disso, após
+    /// executar qualquer comando o agente envia um heartbeat imediato, para a
+    /// tela refletir o novo estado sem esperar o próximo ciclo de heartbeat.
+    /// </summary>
+    public int CommandPollIntervalSeconds { get; set; } = 3;
+
+    /// <summary>
+    /// Aceita certificado HTTPS inválido/auto-assinado do WebServer. Apenas para
+    /// ambientes de teste — em produção use um certificado confiável.
+    /// </summary>
+    public bool IgnorarErrosCertificado { get; set; }
 
     /// <summary>Modo de simulação para testes em máquina de desenvolvimento.</summary>
     public SimulationSettings Simulacao { get; set; } = new();

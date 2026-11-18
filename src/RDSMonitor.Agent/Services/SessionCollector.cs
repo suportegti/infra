@@ -5,26 +5,85 @@ using RDSMonitor.Agent.Models;
 namespace RDSMonitor.Agent.Services;
 
 /// <summary>
-/// Coleta sessões RDS ativas usando o comando nativo <c>quser</c>.
+/// Coleta as sessões RDS do servidor (ativas, ociosas e desconectadas).
+/// Fonte principal: API WTS do Windows (<see cref="WtsSessionApi"/>), que não
+/// depende do idioma. O <c>quser</c> fica como reserva caso a API falhe e para
+/// completar a ociosidade quando a API não a informa.
 /// </summary>
 public class SessionCollector
 {
     private readonly ILogger<SessionCollector> _log;
+    private bool _avisouFallback;
 
     public SessionCollector(ILogger<SessionCollector> log) => _log = log;
 
     public List<SessionInfo> Collect()
     {
         // CPU e memória por sessão são somadas no Worker a partir dos processos.
+        List<SessionInfo>? viaWts = null;
         try
         {
-            return RunQuser();
+            viaWts = WtsSessionApi.ListarSessoesComUsuario()
+                .Select(ConverterWts)
+                .Where(s => s is not null)
+                .Select(s => s!)
+                .ToList();
         }
         catch (Exception ex)
         {
-            _log.LogError(ex, "Erro ao coletar sessões.");
-            return new();
+            if (!_avisouFallback)
+            {
+                _log.LogWarning(ex, "API WTS indisponível; usando quser para coletar sessões.");
+                _avisouFallback = true;
+            }
         }
+
+        List<SessionInfo> viaQuser;
+        try
+        {
+            viaQuser = RunQuser();
+        }
+        catch (Exception ex)
+        {
+            if (viaWts is null) _log.LogError(ex, "Erro ao coletar sessões.");
+            viaQuser = new();
+        }
+
+        if (viaWts is null) return viaQuser;
+
+        // Ociosidade: a API às vezes não informa (LastInputTime = 0); o quser sim.
+        foreach (var s in viaWts.Where(s => s.IdleTimeMinutes == 0))
+        {
+            var q = viaQuser.FirstOrDefault(x => x.SessionId == s.SessionId);
+            if (q is not null) s.IdleTimeMinutes = q.IdleTimeMinutes;
+        }
+
+        return viaWts;
+    }
+
+    private static SessionInfo? ConverterWts(WtsSessionApi.SessaoWts s)
+    {
+        var estado = s.Estado switch
+        {
+            WtsSessionApi.EstadoWts.Active       => "Active",
+            WtsSessionApi.EstadoWts.Shadow       => "Active",
+            WtsSessionApi.EstadoWts.Connected    => "Active",
+            WtsSessionApi.EstadoWts.ConnectQuery => "Active",
+            WtsSessionApi.EstadoWts.Disconnected => "Disconnected",
+            WtsSessionApi.EstadoWts.Idle         => "Idle",
+            _                                    => null,
+        };
+        if (estado is null) return null;
+
+        return new SessionInfo
+        {
+            SessionId       = s.SessionId,
+            Username        = s.Usuario,
+            SessionName     = s.NomeEstacao,
+            State           = estado,
+            LogonTime       = s.LogonUtc ?? DateTime.UtcNow,
+            IdleTimeMinutes = s.OciosidadeMinutos,
+        };
     }
 
     // ── quser ────────────────────────────────────────────────────────────────

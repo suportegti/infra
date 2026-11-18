@@ -1,37 +1,289 @@
 @page "/perfis-usuarios"
-@attribute [Authorize(Roles = "Administrador")]
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = Permissoes.PerfisGerenciar)]
+@inject IPerfilService PerfilService
+@inject IPermissaoService PermissaoService
 
 <PageTitle>Perfis de Usuários · RDSManager</PageTitle>
 
+<ConfirmDialog @ref="confirmacao" />
+
 <div class="dash-header">
     <h1>Perfis de usuários</h1>
-    <p>Permissões de cada perfil de acesso ao RDSManager.</p>
+    <p>Defina o que cada perfil pode ver e fazer no portal. As alterações valem em até 30 segundos para os usuários já conectados.</p>
 </div>
 
-<table class="data-table">
-    <thead>
-        <tr>
-            <th>Perfil</th>
-            <th>Permissões</th>
-        </tr>
-    </thead>
-    <tbody>
-        <tr>
-            <td class="mono">Administrador</td>
-            <td>Logoff, disconnect, encerrar processo, reiniciar servidor</td>
-        </tr>
-        <tr>
-            <td class="mono">Operador</td>
-            <td>Visualizar sessões e servidores</td>
-        </tr>
-        <tr>
-            <td class="mono">Auditor</td>
-            <td>Apenas consultar relatórios e histórico</td>
-        </tr>
-    </tbody>
-</table>
+@if (!string.IsNullOrEmpty(aviso))
+{
+    <div class="login-alert @(avisoErro ? "" : "login-alert-success")" role="alert">@aviso</div>
+}
 
-<p class="dash-note">
-    Esses perfis são fixos no sistema. Para incluir, editar ou desabilitar
-    usuários, use a tela <a href="usuarios">Usuários do sistema</a>.
-</p>
+<details class="form-card" open="@novoAberto">
+    <summary @onclick="() => novoAberto = !novoAberto" @onclick:preventDefault>
+        <span><i class="fa-solid fa-plus"></i> Novo perfil</span>
+        <i class="fa-solid fa-chevron-down chevron"></i>
+    </summary>
+    <div class="form-body">
+        <div class="form-grid">
+            <label class="field">
+                <i class="fa-solid fa-user-shield"></i>
+                <input @bind="novoNome" maxlength="60" placeholder="Nome do perfil (ex.: Suporte N1)" />
+            </label>
+            <label class="field">
+                <i class="fa-solid fa-align-left"></i>
+                <input @bind="novaDescricao" maxlength="250" placeholder="Descrição (opcional)" />
+            </label>
+            <label class="field">
+                <i class="fa-solid fa-copy"></i>
+                <select @bind="novoCopiarDe">
+                    <option value="0">Começar sem permissões</option>
+                    @foreach (var r in perfis)
+                    {
+                        <option value="@r.Perfil.Id">Copiar permissões de: @r.Perfil.Nome</option>
+                    }
+                </select>
+            </label>
+        </div>
+        <div class="form-actions">
+            <button class="btn-pill primary" disabled="@string.IsNullOrWhiteSpace(novoNome)" @onclick="CriarAsync">
+                <i class="fa-solid fa-plus"></i> Criar perfil
+            </button>
+        </div>
+    </div>
+</details>
+
+<div class="perfis-layout">
+    <div class="perfis-lista" role="list">
+        @foreach (var r in perfis)
+        {
+            var p = r.Perfil;
+            <button type="button" role="listitem"
+                    class="perfil-card @(selecionado?.Id == p.Id ? "selected" : "")"
+                    @onclick="() => Selecionar(p)">
+                <span class="perfil-card-nome">
+                    @p.Nome
+                    @if (p.Sistema) { <span class="badge-sistema">sistema</span> }
+                </span>
+                <span class="perfil-card-desc">@(p.Descricao ?? "Sem descrição")</span>
+                <span class="perfil-card-meta">
+                    <span><i class="fa-solid fa-key"></i> @(p.AcessoTotal ? "todas" : p.ListaPermissoes.Count.ToString()) permissões</span>
+                    <span><i class="fa-solid fa-users"></i> @r.Usuarios usuário(s)</span>
+                </span>
+            </button>
+        }
+    </div>
+
+    <section class="form-panel perfil-editor">
+        @if (selecionado is null)
+        {
+            <p class="dash-note" style="margin:0;">Selecione um perfil para ver e editar as permissões.</p>
+        }
+        else
+        {
+            var bloqueado = selecionado.AcessoTotal;
+            <div class="perfil-editor-head">
+                <h2><i class="fa-solid fa-user-shield"></i> @selecionado.Nome</h2>
+                @if (bloqueado)
+                {
+                    <p class="sub-label">O perfil Administrador tem sempre acesso total, para que o sistema nunca fique sem quem gerencie usuários e perfis.</p>
+                }
+                else if (selecionado.Sistema)
+                {
+                    <p class="sub-label">Perfil padrão do sistema: as permissões podem ser ajustadas, mas o nome não, e ele não pode ser excluído.</p>
+                }
+                @if (selecionado.AlteradoEm is { } alt)
+                {
+                    <p class="sub-label">Alterado em @alt.ToLocalTime().ToString("dd/MM/yyyy HH:mm") @(selecionado.AlteradoPor is null ? "" : $"por {selecionado.AlteradoPor}")</p>
+                }
+            </div>
+
+            <div class="form-grid">
+                <label class="field">
+                    <i class="fa-solid fa-tag"></i>
+                    <input @bind="editNome" maxlength="60" disabled="@selecionado.Sistema" aria-label="Nome do perfil" />
+                </label>
+                <label class="field">
+                    <i class="fa-solid fa-align-left"></i>
+                    <input @bind="editDescricao" maxlength="250" disabled="@bloqueado" placeholder="Descrição" aria-label="Descrição" />
+                </label>
+            </div>
+
+            <div class="perm-grupos">
+                @foreach (var grupo in Permissoes.Grupos)
+                {
+                    <fieldset class="perm-grupo" disabled="@bloqueado">
+                        <legend>@grupo.Nome</legend>
+                        @foreach (var item in grupo.Itens)
+                        {
+                            <label class="perm-item">
+                                <input type="checkbox" aria-label="@item.Nome"
+                                       checked="@editPermissoes.Contains(item.Codigo)"
+                                       @onchange="e => Alternar(item.Codigo, (bool)e.Value!)" />
+                                <span>
+                                    <strong>@item.Nome</strong>
+                                    <small>@item.Descricao</small>
+                                </span>
+                            </label>
+                        }
+                    </fieldset>
+                }
+            </div>
+
+            @if (Dependencias() is { Count: > 0 } faltando)
+            {
+                <p class="sub-label perm-aviso">
+                    <i class="fa-solid fa-circle-info"></i>
+                    @string.Join(" ", faltando)
+                </p>
+            }
+
+            <div class="form-actions">
+                @if (!bloqueado)
+                {
+                    <button class="btn-pill primary" @onclick="SalvarAsync"><i class="fa-solid fa-check"></i> Salvar permissões</button>
+                }
+                @if (selecionado.Sistema && !bloqueado)
+                {
+                    <button class="btn-pill" @onclick="RestaurarAsync"><i class="fa-solid fa-rotate-left"></i> Restaurar padrão</button>
+                }
+                @if (!selecionado.Sistema)
+                {
+                    <button class="btn-pill danger" @onclick="ExcluirAsync"><i class="fa-solid fa-trash"></i> Excluir perfil</button>
+                }
+                <button class="btn-pill" @onclick="() => selecionado = null">Fechar</button>
+            </div>
+        }
+    </section>
+</div>
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthState { get; set; } = null!;
+
+    private ConfirmDialog confirmacao = null!;
+    private List<PerfilResumo> perfis = new();
+    private string operador = "portal";
+
+    private string? aviso;
+    private bool    avisoErro;
+
+    private bool    novoAberto;
+    private string  novoNome = string.Empty;
+    private string? novaDescricao;
+    private int     novoCopiarDe;
+
+    private RDSMonitor.Web.Data.Entities.Perfil? selecionado;
+    private string  editNome = string.Empty;
+    private string? editDescricao;
+    private HashSet<string> editPermissoes = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState).User;
+        operador = user.FindFirst("username")?.Value ?? user.Identity?.Name ?? "portal";
+        await CarregarAsync();
+    }
+
+    private async Task CarregarAsync(int? selecionarId = null)
+    {
+        perfis = await PerfilService.ListarAsync();
+        var id = selecionarId ?? selecionado?.Id;
+        selecionado = null;
+        if (id is not null && perfis.FirstOrDefault(r => r.Perfil.Id == id) is { } r)
+            Selecionar(r.Perfil);
+    }
+
+    private void Selecionar(RDSMonitor.Web.Data.Entities.Perfil p)
+    {
+        selecionado    = p;
+        editNome       = p.Nome;
+        editDescricao  = p.Descricao;
+        editPermissoes = p.ListaPermissoes.ToHashSet();
+    }
+
+    private void Alternar(string codigo, bool marcado)
+    {
+        if (marcado) editPermissoes.Add(codigo); else editPermissoes.Remove(codigo);
+    }
+
+    /// <summary>Avisos de combinações que não fazem sentido sozinhas.</summary>
+    private List<string> Dependencias()
+    {
+        var avisos = new List<string>();
+        bool Tem(string c) => editPermissoes.Contains(c);
+
+        if ((Tem(Permissoes.SessoesMensagem) || Tem(Permissoes.SessoesDesconectar) || Tem(Permissoes.SessoesLogoff) || Tem(Permissoes.ProcessosVer))
+            && !Tem(Permissoes.SessoesVer))
+            avisos.Add("As ações em sessões e a lista de processos ficam na tela Sessões: marque também \"Ver sessões\".");
+        if (Tem(Permissoes.ProcessosDerrubar) && !Tem(Permissoes.ProcessosVer))
+            avisos.Add("\"Derrubar processo\" precisa de \"Ver processos\" para aparecer.");
+        if ((Tem(Permissoes.ServidoresGerenciar) || Tem(Permissoes.ServidoresReiniciar)) && !Tem(Permissoes.ServidoresVer))
+            avisos.Add("Gerenciar/reiniciar servidores é feito na tela Servidores: marque também \"Ver servidores\".");
+        return avisos;
+    }
+
+    private async Task CriarAsync()
+    {
+        var (r, id) = await PerfilService.CriarAsync(novoNome, novaDescricao, novoCopiarDe == 0 ? null : novoCopiarDe, operador);
+        if (r == PerfilOperacao.Sucesso)
+        {
+            Avisar($"Perfil \"{novoNome.Trim()}\" criado. Marque as permissões e salve.", false);
+            novoNome = string.Empty; novaDescricao = null; novoCopiarDe = 0; novoAberto = false;
+            await CarregarAsync(id);
+        }
+        else Avisar(Mensagem(r), true);
+    }
+
+    private async Task SalvarAsync()
+    {
+        if (selecionado is null) return;
+        var r = await PerfilService.SalvarAsync(selecionado.Id, editNome, editDescricao, editPermissoes, operador);
+        Avisar(r == PerfilOperacao.Sucesso ? $"Permissões do perfil \"{editNome}\" salvas." : Mensagem(r), r != PerfilOperacao.Sucesso);
+        if (r == PerfilOperacao.Sucesso) await CarregarAsync();
+    }
+
+    private async Task RestaurarAsync()
+    {
+        if (selecionado is null) return;
+        if (!await confirmacao.PerguntarAsync("Restaurar permissões padrão?",
+                $"As permissões do perfil {selecionado.Nome} voltarão ao padrão do sistema. Os ajustes feitos serão perdidos.",
+                "Restaurar padrão", perigo: false))
+            return;
+
+        var r = await PerfilService.RestaurarPadraoAsync(selecionado.Id, operador);
+        Avisar(r == PerfilOperacao.Sucesso ? $"Perfil \"{selecionado.Nome}\" restaurado para o padrão." : Mensagem(r), r != PerfilOperacao.Sucesso);
+        await CarregarAsync();
+    }
+
+    private async Task ExcluirAsync()
+    {
+        if (selecionado is null) return;
+        var nome = selecionado.Nome;
+        if (!await confirmacao.PerguntarAsync("Excluir perfil?",
+                "O perfil será removido. Isso só é possível quando nenhum usuário o utiliza.",
+                "Excluir perfil", perigo: true,
+                detalhes: new[] { ("Perfil", nome) }))
+            return;
+
+        var r = await PerfilService.ExcluirAsync(selecionado.Id);
+        Avisar(r == PerfilOperacao.Sucesso ? $"Perfil \"{nome}\" excluído." : Mensagem(r), r != PerfilOperacao.Sucesso);
+        if (r == PerfilOperacao.Sucesso) selecionado = null;
+        await CarregarAsync();
+    }
+
+    private static string Mensagem(PerfilOperacao r) => r switch
+    {
+        PerfilOperacao.NomeInvalido    => "O nome do perfil deve ter de 2 a 60 caracteres.",
+        PerfilOperacao.NomeJaExiste    => "Já existe um perfil com esse nome.",
+        PerfilOperacao.PerfilProtegido => "Este perfil do sistema não pode ser alterado dessa forma.",
+        PerfilOperacao.PossuiUsuarios  => "Há usuários com este perfil. Troque o perfil deles em Usuários do sistema antes de excluir.",
+        PerfilOperacao.NaoEncontrado   => "Perfil não encontrado (pode ter sido excluído).",
+        _                              => "Não foi possível concluir a operação.",
+    };
+
+    private void Avisar(string texto, bool erro)
+    {
+        aviso     = texto;
+        avisoErro = erro;
+    }
+}
