@@ -27,6 +27,8 @@ public class AgentHeartbeatDto
 
 public class SessionEventDto
 {
+    /// <summary>Log do Windows de origem (informativo).</summary>
+    public string? Log { get; set; }
     public long RecordId { get; set; }
     public int EventId { get; set; }
     /// <summary>"Disconnect" ou "Reconnect".</summary>
@@ -36,6 +38,8 @@ public class SessionEventDto
     public string? ClientIp { get; set; }
     public DateTime TimeUtc { get; set; }
     public int? ReasonCode { get; set; }
+    /// <summary>Sessão que pediu a desconexão (evento 39).</summary>
+    public int? DisconnectedBySessionId { get; set; }
 }
 
 public class SessionInfoDto

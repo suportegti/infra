@@ -126,6 +126,7 @@ public class AppDbContext : DbContext
             e.Property(h => h.ServerName).IsRequired().HasMaxLength(100);
             e.Property(h => h.Username).IsRequired().HasMaxLength(150);
             e.Property(h => h.Cliente).HasMaxLength(100);
+            e.Property(h => h.LogoffReason).HasMaxLength(60);
             e.Property(h => h.ClientName).HasMaxLength(100);
             e.Property(h => h.ClientIp).HasMaxLength(64);
             e.HasIndex(h => h.LogonTime);
@@ -141,7 +142,10 @@ public class AppDbContext : DbContext
             e.Property(x => x.ServerName).IsRequired().HasMaxLength(100);
             e.Property(x => x.Username).IsRequired().HasMaxLength(150);
             e.Property(x => x.ClientIp).HasMaxLength(64);
+            e.Property(x => x.Operador).HasMaxLength(100);
+            e.Property(x => x.DesconectadoPorUsuario).HasMaxLength(150);
             e.Ignore(x => x.Motivo);
+            e.Ignore(x => x.Nome);
             e.HasOne(x => x.SessionHistory)
              .WithMany(h => h.Eventos)
              .HasForeignKey(x => x.SessionHistoryId)

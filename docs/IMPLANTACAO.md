@@ -57,20 +57,20 @@ o IP do servidor do portal antes de instalar os agentes.
 Na raiz do repositório:
 
 ```powershell
-.\deploy\build-pacotes.ps1 -Versao 1.5.0
+.\deploy\build-pacotes.ps1 -Versao 1.6.0
 ```
 
 Resultado em `dist\`:
 
 | Pacote | Conteúdo |
 |---|---|
-| `RDSMonitor.Web-1.5.0.zip` | `app\`, `install-web.ps1`, `uninstall-web.ps1`, este guia |
-| `RDSMonitor.Agent-1.5.0.zip` | `app\`, `install-agent.ps1`, `uninstall-agent.ps1`, este guia |
+| `RDSMonitor.Web-1.6.0.zip` | `app\`, `install-web.ps1`, `uninstall-web.ps1`, este guia |
+| `RDSMonitor.Agent-1.6.0.zip` | `app\`, `install-agent.ps1`, `uninstall-agent.ps1`, este guia |
 
 Copie cada `.zip` para o servidor de destino (compartilhamento, RDP, etc.).
 
 > **Antes de extrair**, desbloqueie o arquivo, senão o Windows marca os scripts como
-> baixados da internet: `Unblock-File .\RDSMonitor.Web-1.5.0.zip`
+> baixados da internet: `Unblock-File .\RDSMonitor.Web-1.6.0.zip`
 
 ---
 
@@ -79,8 +79,8 @@ Copie cada `.zip` para o servidor de destino (compartilhamento, RDP, etc.).
 No servidor escolhido para o portal, **PowerShell como Administrador**:
 
 ```powershell
-Unblock-File .\RDSMonitor.Web-1.5.0.zip
-Expand-Archive .\RDSMonitor.Web-1.5.0.zip -DestinationPath C:\Temp\RDSMonitor.Web
+Unblock-File .\RDSMonitor.Web-1.6.0.zip
+Expand-Archive .\RDSMonitor.Web-1.6.0.zip -DestinationPath C:\Temp\RDSMonitor.Web
 cd C:\Temp\RDSMonitor.Web
 powershell -ExecutionPolicy Bypass -File .\install-web.ps1 -SenhaAdmin "Defina#UmaSenha1"
 ```
@@ -191,8 +191,8 @@ O registro fica guardado mesmo que o servidor seja excluído depois.
 **PowerShell como Administrador** no servidor RDS:
 
 ```powershell
-Unblock-File .\RDSMonitor.Agent-1.5.0.zip
-Expand-Archive .\RDSMonitor.Agent-1.5.0.zip -DestinationPath C:\Temp\RDSMonitor.Agent
+Unblock-File .\RDSMonitor.Agent-1.6.0.zip
+Expand-Archive .\RDSMonitor.Agent-1.6.0.zip -DestinationPath C:\Temp\RDSMonitor.Agent
 cd C:\Temp\RDSMonitor.Agent
 powershell -ExecutionPolicy Bypass -File .\install-agent.ps1 -ServidorWeb 10.0.0.20 -ApiKey "<chave mostrada pelo portal>"
 ```
@@ -372,10 +372,12 @@ Num PowerShell **como administrador**, no servidor RDS (não precisa parar o ser
 ```
 
 Mostra quatro blocos: o que a API do Windows (WTS) enxerga (com a máquina e o IP
-de origem), o que o agente envia ao portal (com a contagem de desconectadas), as
-desconexões (24) e reconexões (25) das últimas 24 h no log do Windows e a saída
-do `quser` para comparação. Se o bloco 3 disser "sem permissão", o agente não
-está rodando como LocalSystem/administrador e não enviará desconexões. Se a
+de origem), o que o agente envia ao portal (com a contagem de desconectadas), os
+eventos de sessão das últimas 24 h nos logs do Windows (1149 autenticação, 21
+logon, 22 shell, 23 logoff, 24 desconexão com motivo e sessão que pediu, 25
+reconexão) e a saída do `quser` para comparação. Se o bloco 3 disser "sem
+permissão", o agente não está rodando como LocalSystem/administrador e o
+histórico fica só com o que o heartbeat percebe. Se a
 sessão aparece como `Disconnected` no bloco 2, ela vai aparecer como *Desconectada*
 na tela Sessões no próximo heartbeat (até 15 s).
 

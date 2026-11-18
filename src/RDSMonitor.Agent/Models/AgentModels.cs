@@ -19,16 +19,19 @@ public class AgentHeartbeat
 }
 
 /// <summary>
-/// Evento de sessão do log "TerminalServices-LocalSessionManager/Operational":
-/// 24 = sessão desconectada, 25 = reconexão. O motivo vem do evento 40
-/// (código de desconexão), quando o Windows o registra.
+/// Evento do ciclo de vida da sessão lido dos logs do Windows: 1149 autenticação,
+/// 21 logon, 22 shell, 23 logoff, 24 desconexão, 25 reconexão. Numa desconexão,
+/// o motivo vem do evento 40 e a sessão que a pediu, do evento 39.
 /// </summary>
 public class SessionEventInfo
 {
+    /// <summary>Log do Windows de onde veio o evento (o RecordId é sequencial por log).</summary>
+    public string Log           { get; set; } = string.Empty;
+
     /// <summary>EventRecordID do Windows — o portal usa para não gravar o mesmo evento duas vezes.</summary>
     public long RecordId        { get; set; }
     public int EventId          { get; set; }
-    /// <summary>"Disconnect" ou "Reconnect".</summary>
+    /// <summary>"Auth", "Logon", "Shell", "Logoff", "Disconnect" ou "Reconnect".</summary>
     public string Type          { get; set; } = string.Empty;
     public int SessionId        { get; set; }
     public string Username      { get; set; } = string.Empty;
@@ -37,6 +40,8 @@ public class SessionEventInfo
     public DateTime TimeUtc     { get; set; }
     /// <summary>Código de motivo do evento 40 (só em desconexões).</summary>
     public int? ReasonCode      { get; set; }
+    /// <summary>Sessão que pediu a desconexão (evento 39): a própria = o usuário; outra = alguém nela; 0 = serviço do servidor.</summary>
+    public int? DisconnectedBySessionId { get; set; }
 }
 
 public class SessionInfo

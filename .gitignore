@@ -8,3 +8,6 @@ obj/
 
 # Pacotes de instalacao gerados por deploy/build-pacotes.ps1
 dist/
+
+# Gatilho de simulacao do agente (modo Development)
+simulacao.txt

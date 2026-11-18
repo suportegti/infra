@@ -29,24 +29,41 @@ public class SimulatedSessionStore
     private readonly List<SessionEventInfo> _eventos = new();
     private long _proximoEvento = -1;            // RecordId negativo = evento simulado
     private DateTime _proximaQueda;
+
+    /// <summary>
+    /// Arquivo de gatilho (na pasta do agente) para provocar eventos sob demanda.
+    /// Uma instrução por linha; o arquivo é apagado depois de lido:
+    ///   queda ana.teste 180        → perde a conexão (rede) e reconecta em 180 s
+    ///   desconectar ana.teste 60   → o próprio usuário clica em Desconectar; volta em 60 s
+    ///   reconectar ana.teste       → reconecta agora
+    ///   logoff ana.teste 120       → o usuário faz logoff; entra de novo em 120 s
+    /// </summary>
+    public const string ArquivoGatilho = "simulacao.txt";
+    private readonly string _caminhoGatilho;
+    private readonly Timer? _timer;
     private int _proximaSessao = 901;
     private int _proximoPid    = 9_000_000;
 
     public bool Habilitada => _cfg.Habilitada;
 
-    public SimulatedSessionStore(AgentSettings settings, ILogger<SimulatedSessionStore> log)
+    public SimulatedSessionStore(AgentSettings settings, IHostEnvironment env, ILogger<SimulatedSessionStore> log)
     {
         _cfg = settings.Simulacao;
         _log = log;
+        _caminhoGatilho = Path.Combine(env.ContentRootPath, ArquivoGatilho);
         if (!_cfg.Habilitada) return;
+
+        // Confere o gatilho e as reconexões a cada 2 s (sem esperar o heartbeat)
+        _timer = new Timer(_ => Tick(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
 
         var usuarios = _cfg.Usuarios.Count > 0 ? _cfg.Usuarios : new List<string> { "ana.teste", "bruno.teste", "carla.teste" };
         foreach (var u in usuarios) _sessoes.Add(NovaSessao(u, DateTime.UtcNow.AddMinutes(-_rnd.Next(10, 240))));
         AgendarQueda();
 
         _log.LogWarning("MODO DE SIMULAÇÃO ATIVO: {Qtd} sessão(ões) fictícia(s) ({Usuarios}). " +
-                        "Logoff/Disconnect/reinício em sessões reais estão bloqueados.",
-            _sessoes.Count, string.Join(", ", usuarios));
+                        "Logoff/Disconnect/reinício em sessões reais estão bloqueados. " +
+                        "Para provocar quedas sob demanda, grave instruções em {Arquivo}.",
+            _sessoes.Count, string.Join(", ", usuarios), _caminhoGatilho);
     }
 
     // ── Leitura (heartbeat) ───────────────────────────────────
@@ -118,7 +135,7 @@ public class SimulatedSessionStore
             if (s is null) return Erro($"Sessão simulada {sessionId} não existe mais.");
             if (s.DesconectadaEm is not null) return Erro($"A sessão {sessionId} de {s.Usuario} já está desconectada.");
 
-            Desconectar(s, motivo: 1);   // 1 = desconectada por ferramenta administrativa
+            Desconectar(s, motivo: 1, segundos: null, porSessao: 0);   // pedido pelo serviço do agente (sessão 0)
             _log.LogInformation("[SIMULAÇÃO] tsdiscon {Id} — {Usuario} desconectado.", sessionId, s.Usuario);
             return Ok($"Sessão {sessionId} de {s.Usuario} desconectada (tsdiscon {sessionId}). Os programas continuam abertos.");
         }
@@ -132,6 +149,7 @@ public class SimulatedSessionStore
             if (s is null) return Erro($"Sessão simulada {sessionId} não existe mais.");
 
             _sessoes.Remove(s);
+            Evento(s, 23, "Logoff", DateTime.UtcNow, null);
             _relogins.Add((s.Usuario, DateTime.UtcNow.AddSeconds(_cfg.RelogarAposSegundos)));
             _log.LogInformation("[SIMULAÇÃO] logoff {Id} — sessão de {Usuario} encerrada ({Procs} processos fechados).",
                 sessionId, s.Usuario, s.Processos.Count);
@@ -175,12 +193,75 @@ public class SimulatedSessionStore
 
     // ── Internos ──────────────────────────────────────────────
 
-    private void Desconectar(SimSession s, int motivo)
+    private void Desconectar(SimSession s, int motivo, int? segundos, int? porSessao)
     {
         var agora = DateTime.UtcNow;
         s.DesconectadaEm = agora;
-        s.ReconectarEm   = agora.AddSeconds(Math.Max(10, _cfg.ReconectarAposSegundos));
-        Evento(s, 24, "Disconnect", agora, motivo);
+        s.ReconectarEm   = agora.AddSeconds(Math.Max(10, segundos ?? _cfg.ReconectarAposSegundos));
+        Evento(s, 24, "Disconnect", agora, motivo, porSessao);
+    }
+
+    private void Tick()
+    {
+        try
+        {
+            lock (_lock)
+            {
+                LerGatilho();
+                ProcessarQuedasEReconexoes();
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning("[SIMULAÇÃO] Erro ao processar {Arquivo}: {Msg}", ArquivoGatilho, ex.Message);
+        }
+    }
+
+    private void LerGatilho()
+    {
+        if (!File.Exists(_caminhoGatilho)) return;
+        var linhas = File.ReadAllLines(_caminhoGatilho);
+        File.Delete(_caminhoGatilho);
+
+        foreach (var linha in linhas.Select(l => l.Trim()).Where(l => l.Length > 0 && !l.StartsWith('#')))
+        {
+            var p = linha.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var acao = p[0].ToLowerInvariant();
+            var s = p.Length > 1 ? _sessoes.FirstOrDefault(x => x.Usuario.Equals(p[1], StringComparison.OrdinalIgnoreCase)) : null;
+            int? segundos = p.Length > 2 && int.TryParse(p[2], out var seg) ? seg : null;
+
+            if (s is null)
+            {
+                _log.LogWarning("[SIMULAÇÃO] Gatilho ignorado (usuário não encontrado): {Linha}", linha);
+                continue;
+            }
+
+            switch (acao)
+            {
+                case "queda" when s.DesconectadaEm is null:
+                    Desconectar(s, motivo: 0, segundos, porSessao: null);    // 0 = conexão perdida (rede): sem evento 39
+                    _log.LogInformation("[SIMULAÇÃO] Queda de rede: {Usuario} (sessão {Id}) desconectado; reconecta em {Seg}s.",
+                        s.Usuario, s.Id, segundos ?? _cfg.ReconectarAposSegundos);
+                    break;
+                case "desconectar" when s.DesconectadaEm is null:
+                    Desconectar(s, motivo: 11, segundos, porSessao: s.Id);   // 11 + 39 da própria sessão = o usuário clicou
+                    _log.LogInformation("[SIMULAÇÃO] {Usuario} clicou em Desconectar (sessão {Id}); reconecta em {Seg}s.",
+                        s.Usuario, s.Id, segundos ?? _cfg.ReconectarAposSegundos);
+                    break;
+                case "logoff":
+                    _sessoes.Remove(s);
+                    Evento(s, 23, "Logoff", DateTime.UtcNow, null);
+                    _relogins.Add((s.Usuario, DateTime.UtcNow.AddSeconds(segundos ?? _cfg.RelogarAposSegundos)));
+                    _log.LogInformation("[SIMULAÇÃO] {Usuario} fez logoff (sessão {Id}).", s.Usuario, s.Id);
+                    break;
+                case "reconectar" when s.DesconectadaEm is not null:
+                    s.ReconectarEm = DateTime.UtcNow;
+                    break;
+                default:
+                    _log.LogWarning("[SIMULAÇÃO] Gatilho ignorado (ação inválida ou sessão já nesse estado): {Linha}", linha);
+                    break;
+            }
+        }
     }
 
     /// <summary>
@@ -194,6 +275,7 @@ public class SimulatedSessionStore
         {
             s.DesconectadaEm = null;
             s.ReconectarEm   = null;
+            Evento(s, 1149, "Auth", agora.AddSeconds(-2), null);
             Evento(s, 25, "Reconnect", agora, null);
             _log.LogInformation("[SIMULAÇÃO] {Usuario} reconectou na sessão {Id}.", s.Usuario, s.Id);
         }
@@ -204,7 +286,7 @@ public class SimulatedSessionStore
             if (conectadas.Count > 0)
             {
                 var s = conectadas[_rnd.Next(conectadas.Count)];
-                Desconectar(s, motivo: 0);   // 0 = sem informação adicional (típico de queda de rede)
+                Desconectar(s, motivo: 0, segundos: null, porSessao: null);   // 0 = sem informação adicional (típico de queda de rede)
                 _log.LogInformation("[SIMULAÇÃO] Queda de rede: {Usuario} (sessão {Id}) desconectado.", s.Usuario, s.Id);
             }
             AgendarQueda();
@@ -214,17 +296,19 @@ public class SimulatedSessionStore
     private void AgendarQueda()
         => _proximaQueda = DateTime.UtcNow.AddMinutes(Math.Max(0.5, _cfg.QuedaDeRedeACadaMinutos));
 
-    private void Evento(SimSession s, int eventId, string tipo, DateTime quando, int? motivo)
+    private void Evento(SimSession s, int eventId, string tipo, DateTime quando, int? motivo, int? porSessao = null)
         => _eventos.Add(new SessionEventInfo
         {
+            Log        = "Simulacao",
             RecordId   = _proximoEvento--,
             EventId    = eventId,
             Type       = tipo,
-            SessionId  = s.Id,
+            SessionId  = eventId == 1149 ? 0 : s.Id,
             Username   = s.Usuario,
-            ClientIp   = s.Ip,
+            ClientIp   = eventId == 23 ? null : s.Ip,
             TimeUtc    = quando,
             ReasonCode = motivo,
+            DisconnectedBySessionId = porSessao,
         });
 
     private void ProcessarRelogins()
@@ -249,6 +333,9 @@ public class SimulatedSessionStore
             Estacao  = "NB-" + usuario.Split('.')[0].ToUpperInvariant(),
             Ip       = $"10.0.{_rnd.Next(1, 20)}.{_rnd.Next(10, 250)}",
         };
+        Evento(s, 1149, "Auth",  logonUtc.AddSeconds(-3), null);
+        Evento(s, 21,   "Logon", logonUtc, null);
+        Evento(s, 22,   "Shell", logonUtc.AddSeconds(4), null);
 
         // Processos de sistema da sessão (protegidos) + programas do usuário
         s.Processos.Add(Proc("csrss",       2,   0.1, protegido: true));

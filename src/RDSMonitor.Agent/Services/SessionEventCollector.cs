@@ -4,23 +4,29 @@ using RDSMonitor.Agent.Models;
 namespace RDSMonitor.Agent.Services;
 
 /// <summary>
-/// Lê as desconexões e reconexões de sessão do log do Windows
-/// "Microsoft-Windows-TerminalServices-LocalSessionManager/Operational":
+/// Lê o ciclo de vida das sessões RDS nos logs do Windows e envia ao portal,
+/// que monta o histórico a partir deles:
 /// <list type="bullet">
-///   <item>24 — sessão desconectada (usuário, ID da sessão, endereço de origem);</item>
-///   <item>25 — reconexão bem-sucedida;</item>
-///   <item>40 — código do motivo da desconexão, associado ao evento 24 da mesma sessão.</item>
+///   <item>TerminalServices-LocalSessionManager/Operational:
+///     21 logon · 22 shell iniciado · 23 logoff · 24 desconexão · 25 reconexão ·
+///     39 "sessão X desconectada pela sessão Y" · 40 motivo da desconexão;</item>
+///   <item>TerminalServices-RemoteConnectionManager/Operational:
+///     1149 autenticação RDP aceita (usuário e IP de origem).</item>
 /// </list>
-/// Diferente do estado da sessão (amostrado a cada heartbeat), o log registra
-/// cada queda e reconexão, mesmo as que duram poucos segundos.
+/// Os eventos 39 e 40 não viram registros próprios: completam o 24 da mesma
+/// sessão (quem pediu a desconexão e o código do motivo).
 ///
 /// Os eventos só são considerados enviados depois que o heartbeat é aceito
 /// (<see cref="Confirmar"/>); se o portal estiver fora, são reenviados no
-/// próximo ciclo. O portal descarta duplicados pelo EventRecordID.
+/// próximo ciclo. O portal descarta duplicados.
 /// </summary>
 public class SessionEventCollector
 {
-    public const string LogName = "Microsoft-Windows-TerminalServices-LocalSessionManager/Operational";
+    public const string LogName       = "Microsoft-Windows-TerminalServices-LocalSessionManager/Operational";
+    public const string LogConexoes   = "Microsoft-Windows-TerminalServices-RemoteConnectionManager/Operational";
+
+    private const string FiltroSessoes = "EventID=21 or EventID=22 or EventID=23 or EventID=24 or EventID=25 or EventID=39 or EventID=40";
+    private const string FiltroConexoes = "EventID=1149";
 
     /// <summary>Na primeira leitura após iniciar, busca o que aconteceu nas últimas horas.</summary>
     private static readonly TimeSpan JanelaInicial = TimeSpan.FromHours(24);
@@ -28,68 +34,68 @@ public class SessionEventCollector
     /// <summary>Limite por heartbeat — o restante vai nos próximos ciclos.</summary>
     private const int MaxPorEnvio = 500;
 
-    /// <summary>O evento 40 é gravado junto com o 24; tolerância para associá-los.</summary>
-    private static readonly TimeSpan ToleranciaMotivo = TimeSpan.FromSeconds(15);
+    /// <summary>39 e 40 são gravados junto com o 24; tolerância para associá-los.</summary>
+    private static readonly TimeSpan Tolerancia = TimeSpan.FromSeconds(15);
 
     private readonly ILogger<SessionEventCollector> _log;
-    private long? _ultimoConfirmado;
-    private bool  _avisouErro;
+    private readonly Dictionary<string, long?> _ultimoConfirmado = new() { [LogName] = null, [LogConexoes] = null };
+    private readonly HashSet<string> _avisouErro = new();
 
     public SessionEventCollector(ILogger<SessionEventCollector> log) => _log = log;
 
     /// <summary>Eventos ainda não confirmados pelo portal, em ordem cronológica.</summary>
     public List<SessionEventInfo> Coletar()
     {
+        var resultado = new List<SessionEventInfo>();
+        resultado.AddRange(ConverterSessoes(Ler(LogName, FiltroSessoes)));
+        resultado.AddRange(ConverterConexoes(Ler(LogConexoes, FiltroConexoes)));
+        return resultado.OrderBy(e => e.TimeUtc).ThenBy(e => e.EventId == 1149 ? 0 : 1).Take(MaxPorEnvio).ToList();
+    }
+
+    /// <summary>Marca como entregues os eventos enviados (heartbeat aceito pelo portal).</summary>
+    public void Confirmar(IReadOnlyCollection<SessionEventInfo> enviados)
+    {
+        foreach (var log in _ultimoConfirmado.Keys.ToList())
+        {
+            var doLog = enviados.Where(e => e.Log == log && e.RecordId > 0).ToList();
+            if (doLog.Count > 0)
+                _ultimoConfirmado[log] = Math.Max(_ultimoConfirmado[log] ?? 0, doLog.Max(e => e.RecordId));
+            else
+                _ultimoConfirmado[log] ??= UltimoRecordId(log);   // nada novo: avança a janela para não reler 24h
+        }
+    }
+
+    private List<EventRecord> Ler(string log, string ids)
+    {
+        var brutos = new List<EventRecord>();
         try
         {
-            var filtro = _ultimoConfirmado is { } ultimo
-                ? $"*[System[(EventID=24 or EventID=25 or EventID=40) and (EventRecordID > {ultimo})]]"
-                : $"*[System[(EventID=24 or EventID=25 or EventID=40) and TimeCreated[timediff(@SystemTime) <= {(long)JanelaInicial.TotalMilliseconds}]]]";
+            var filtro = _ultimoConfirmado[log] is { } ultimo
+                ? $"*[System[({ids}) and (EventRecordID > {ultimo})]]"
+                : $"*[System[({ids}) and TimeCreated[timediff(@SystemTime) <= {(long)JanelaInicial.TotalMilliseconds}]]]";
 
-            var brutos = new List<EventRecord>();
-            using (var reader = new EventLogReader(new EventLogQuery(LogName, PathType.LogName, filtro)))
+            using var reader = new EventLogReader(new EventLogQuery(log, PathType.LogName, filtro));
+            for (var ev = reader.ReadEvent(); ev is not null; ev = reader.ReadEvent())
             {
-                for (var ev = reader.ReadEvent(); ev is not null; ev = reader.ReadEvent())
-                {
-                    brutos.Add(ev);
-                    if (brutos.Count >= MaxPorEnvio * 2) break;
-                }
+                brutos.Add(ev);
+                if (brutos.Count >= MaxPorEnvio * 3) break;
             }
-
-            var resultado = Converter(brutos);
-            foreach (var ev in brutos) ev.Dispose();
-
-            _avisouErro = false;
-            return resultado.Take(MaxPorEnvio).ToList();
+            _avisouErro.Remove(log);
         }
         catch (Exception ex) when (ex is EventLogException or UnauthorizedAccessException)
         {
-            if (!_avisouErro)
-            {
-                _log.LogWarning("Não foi possível ler o log {Log}: {Msg}. Desconexões e reconexões não serão enviadas " +
-                                "(o agente precisa rodar como LocalSystem ou administrador).", LogName, ex.Message);
-                _avisouErro = true;
-            }
-            return new();
+            if (_avisouErro.Add(log))
+                _log.LogWarning("Não foi possível ler o log {Log}: {Msg}. Esses eventos não serão enviados " +
+                                "(o agente precisa rodar como LocalSystem ou administrador).", log, ex.Message);
         }
+        return brutos;
     }
 
-    /// <summary>Marca como entregues os eventos até este RecordId (heartbeat aceito pelo portal).</summary>
-    public void Confirmar(IReadOnlyCollection<SessionEventInfo> enviados)
-    {
-        var reais = enviados.Where(e => e.RecordId > 0).ToList();
-        if (reais.Count > 0)
-            _ultimoConfirmado = Math.Max(_ultimoConfirmado ?? 0, reais.Max(e => e.RecordId));
-        else
-            _ultimoConfirmado ??= UltimoRecordIdDoLog();   // nada novo: avança a janela para não reler 24h
-    }
-
-    private static long? UltimoRecordIdDoLog()
+    private static long? UltimoRecordId(string log)
     {
         try
         {
-            var q = new EventLogQuery(LogName, PathType.LogName) { ReverseDirection = true };
-            using var reader = new EventLogReader(q);
+            using var reader = new EventLogReader(new EventLogQuery(log, PathType.LogName) { ReverseDirection = true });
             using var ev = reader.ReadEvent();
             return ev?.RecordId ?? 0;
         }
@@ -99,48 +105,89 @@ public class SessionEventCollector
         }
     }
 
-    private static List<SessionEventInfo> Converter(List<EventRecord> brutos)
+    private static List<SessionEventInfo> ConverterSessoes(List<EventRecord> brutos)
     {
-        // Motivos (evento 40): sessão + horário + código
-        var motivos = brutos
-            .Where(e => e.Id == 40 && e.TimeCreated is not null)
-            .Select(e => (Sessao: Inteiro(e, 0), Quando: e.TimeCreated!.Value.ToUniversalTime(), Codigo: Inteiro(e, 1)))
-            .Where(m => m.Sessao is not null)
-            .ToList();
-
-        var lista = new List<SessionEventInfo>();
-        foreach (var e in brutos.Where(e => e.Id is 24 or 25 && e.TimeCreated is not null && e.RecordId is not null))
+        try
         {
-            var sessao = Inteiro(e, 1);
-            if (sessao is null) continue;
+            // 40: sessão + código do motivo · 39: sessão desconectada + sessão que pediu
+            var motivos = brutos.Where(e => e.Id == 40 && e.TimeCreated is not null)
+                .Select(e => (Sessao: Inteiro(e, 0), Quando: Utc(e), Valor: Inteiro(e, 1))).ToList();
+            var autores = brutos.Where(e => e.Id == 39 && e.TimeCreated is not null)
+                .Select(e => (Sessao: Inteiro(e, 0), Quando: Utc(e), Valor: Inteiro(e, 1))).ToList();
 
-            var quando = e.TimeCreated!.Value.ToUniversalTime();
-            int? motivo = null;
-            if (e.Id == 24)
+            int? Associado(List<(int? Sessao, DateTime Quando, int? Valor)> lista, int sessao, DateTime quando) => lista
+                .Where(m => m.Sessao == sessao && (m.Quando - quando).Duration() <= Tolerancia)
+                .OrderBy(m => (m.Quando - quando).Duration())
+                .Select(m => m.Valor)
+                .FirstOrDefault();
+
+            var lista = new List<SessionEventInfo>();
+            foreach (var e in brutos.Where(e => e.Id is 21 or 22 or 23 or 24 or 25 && e.TimeCreated is not null && e.RecordId is not null))
             {
-                motivo = motivos
-                    .Where(m => m.Sessao == sessao && (m.Quando - quando).Duration() <= ToleranciaMotivo)
-                    .OrderBy(m => (m.Quando - quando).Duration())
-                    .Select(m => m.Codigo)
-                    .FirstOrDefault();
+                var sessao = Inteiro(e, 1);
+                if (sessao is null) continue;
+
+                var quando   = Utc(e);
+                var endereco = e.Id == 23 ? null : Texto(e, 2);
+                lista.Add(new SessionEventInfo
+                {
+                    Log        = LogName,
+                    RecordId   = e.RecordId!.Value,
+                    EventId    = e.Id,
+                    Type       = Tipo(e.Id),
+                    SessionId  = sessao.Value,
+                    Username   = SemDominio(Texto(e, 0)),
+                    ClientIp   = string.IsNullOrWhiteSpace(endereco) ? null : endereco,
+                    TimeUtc    = quando,
+                    ReasonCode = e.Id == 24 ? Associado(motivos, sessao.Value, quando) : null,
+                    DisconnectedBySessionId = e.Id == 24 ? Associado(autores, sessao.Value, quando) : null,
+                });
             }
-
-            var endereco = Texto(e, 2);
-            lista.Add(new SessionEventInfo
-            {
-                RecordId   = e.RecordId!.Value,
-                EventId    = e.Id,
-                Type       = e.Id == 24 ? "Disconnect" : "Reconnect",
-                SessionId  = sessao.Value,
-                Username   = SemDominio(Texto(e, 0)),
-                ClientIp   = string.IsNullOrWhiteSpace(endereco) ? null : endereco,
-                TimeUtc    = quando,
-                ReasonCode = motivo,
-            });
+            return lista;
         }
-
-        return lista.OrderBy(e => e.RecordId).ToList();
+        finally
+        {
+            foreach (var ev in brutos) ev.Dispose();
+        }
     }
+
+    private static List<SessionEventInfo> ConverterConexoes(List<EventRecord> brutos)
+    {
+        try
+        {
+            return brutos
+                .Where(e => e.Id == 1149 && e.TimeCreated is not null && e.RecordId is not null)
+                .Select(e => new SessionEventInfo
+                {
+                    Log       = LogConexoes,
+                    RecordId  = e.RecordId!.Value,
+                    EventId   = 1149,
+                    Type      = "Auth",
+                    SessionId = 0,                         // o 1149 é anterior à sessão: não tem ID
+                    Username  = SemDominio(Texto(e, 0)),
+                    ClientIp  = Texto(e, 2) is { Length: > 0 } ip ? ip : null,
+                    TimeUtc   = Utc(e),
+                })
+                .Where(e => e.Username.Length > 0)
+                .ToList();
+        }
+        finally
+        {
+            foreach (var ev in brutos) ev.Dispose();
+        }
+    }
+
+    private static string Tipo(int id) => id switch
+    {
+        21 => "Logon",
+        22 => "Shell",
+        23 => "Logoff",
+        24 => "Disconnect",
+        25 => "Reconnect",
+        _  => "Outro",
+    };
+
+    private static DateTime Utc(EventRecord e) => e.TimeCreated!.Value.ToUniversalTime();
 
     private static string? Texto(EventRecord e, int i)
         => e.Properties.Count > i ? e.Properties[i].Value?.ToString()?.Trim() : null;

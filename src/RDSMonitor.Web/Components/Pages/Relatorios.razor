@@ -53,16 +53,16 @@
     <div class="form-actions">
         <button class="btn-pill primary" @onclick="PesquisarAsync"><i class="fa-solid fa-magnifying-glass"></i> Pesquisar</button>
         <button class="btn-pill" @onclick="LimparAsync"><i class="fa-solid fa-eraser"></i> Limpar filtros</button>
-        <a class="btn-pill" href="@Url("sessoes.xlsx")" download><i class="fa-solid fa-file-excel"></i> Exportar sessões</a>
-        <a class="btn-pill" href="@Url("desconexoes.xlsx")" download title="Cada desconexão e reconexão das sessões filtradas, com o motivo">
-            <i class="fa-solid fa-file-excel"></i> Exportar desconexões
+        <a class="btn-pill" href="@Url("eventos.xlsx")" download title="As mesmas linhas e colunas da tabela abaixo">
+            <i class="fa-solid fa-file-excel"></i> Exportar Excel
         </a>
     </div>
 </section>
 
 <p class="dash-note relatorio-nota">
-    Mostra as sessões que estiveram abertas em algum momento do período, inclusive as que começaram antes dele.
-    Desconexões e reconexões vêm do log do Windows (eventos 24 e 25), lidas pelo agente 1.5.0 ou mais novo.
+    Cada linha é um evento das sessões no período: LOGON, DESCONEXÃO, RECONEXÃO e LOGOFF, lidos pelo agente
+    dos logs do Windows (eventos 21, 24, 25 e 23). Sessões registradas antes disso mostram LOGON e LOGOFF
+    pelos horários de login e logoff (marcados com <i class="fa-solid fa-clock-rotate-left"></i>).
 </p>
 
 @if (!carregando && itens.Count > 0)
@@ -81,6 +81,15 @@
     </div>
 }
 
+<div class="toolbar relatorio-opcoes">
+    <label class="toolbar-check" title="Eventos 1149 (autenticação RDP) e 22 (área de trabalho carregada)">
+        <input type="checkbox" @bind="incluirSecundarios" @bind:after="MontarLinhas" /> Mostrar autenticação e área de trabalho
+    </label>
+    <label class="toolbar-check">
+        <input type="checkbox" @bind="maisRecentes" @bind:after="MontarLinhas" /> Mais recentes primeiro
+    </label>
+</div>
+
 <p class="search-summary" role="status">
     @if (carregando)
     {
@@ -88,130 +97,63 @@
     }
     else
     {
-        <span><strong>@itens.Count</strong> sessão(ões)@(truncado ? $" — exibindo as {filtro.Limite} mais recentes; refine o período ou exporte para o Excel" : "").</span>
+        <span>
+            <strong>@linhas.Count</strong> evento(s) de <strong>@itens.Count</strong> sessão(ões)@(truncado ? $" — exibindo as {filtro.Limite} sessões mais recentes; refine o período ou exporte para o Excel" : "")@(linhas.Count > LimiteTela ? $" — mostrando os {LimiteTela} primeiros; exporte para ver todos" : "").
+        </span>
     }
 </p>
 
-@if (itens.Count > 0)
+@if (linhas.Count > 0)
 {
-    <table class="data-table">
+    <table class="data-table relatorio-eventos">
         <thead>
             <tr>
-                <th></th>
+                <th>Data/hora</th>
                 <th>Servidor</th>
                 <th>Usuário</th>
-                <th>Origem</th>
                 <th>Sessão</th>
-                <th>Login</th>
-                <th>Logoff</th>
+                <th>Origem</th>
                 <th>Duração</th>
-                <th>Desconexões</th>
-                <th>Encerramento</th>
+                <th>Status</th>
+                <th>Detalhe</th>
             </tr>
         </thead>
         <tbody>
-            @foreach (var h in itens)
+            @foreach (var l in linhas.Take(LimiteTela))
             {
-                var qtdDesc   = RelatorioService.Desconexoes(h);
-                var temEventos = h.Eventos.Count > 0;
-                var aberta    = abertas.Contains(h.Id);
-                <tr class="@(aberta ? "row-expanded" : "")">
-                    <td>
-                        @if (temEventos)
+                var h = l.Sessao;
+                <tr class="@(l.Tipo is SessionEventType.Shell or SessionEventType.Autenticacao ? "row-secundaria" : "")">
+                    <td class="mono">
+                        @Horario.Fmt(l.DataHora, "dd/MM/yyyy HH:mm:ss")
+                        @if (!l.Registrado)
                         {
-                            <button class="btn-expand" @onclick="() => Alternar(h.Id)"
-                                    title="@(aberta ? "Ocultar desconexões" : "Ver desconexões e reconexões")"
-                                    aria-expanded="@(aberta ? "true" : "false")">
-                                <i class="fa-solid @(aberta ? "fa-chevron-down" : "fa-chevron-right")"></i>
-                            </button>
+                            <i class="fa-solid fa-clock-rotate-left sub-label" title="Montado a partir do horário de login/logoff da sessão (agente sem os eventos do Windows)"></i>
                         }
                     </td>
                     <td class="mono">
                         @h.ServerName
                         @if (h.Cliente is not null)
                         {
-                            <span class="sub-label">@h.Cliente</span>
+                            <span class="sub-label">(@h.Cliente)</span>
                         }
                     </td>
                     <td>@h.Username</td>
-                    <td>
-                        @if (h.ClientName is null && h.ClientIp is null)
-                        {
-                            <span class="sub-label">—</span>
-                        }
-                        else
-                        {
-                            <span class="mono">@h.ClientName</span>
-                            @if (h.ClientIp is not null)
-                            {
-                                <span class="sub-label mono">@h.ClientIp</span>
-                            }
-                        }
-                    </td>
                     <td class="mono">@h.RdsSessionId</td>
-                    <td class="mono">@Horario.Fmt(h.LogonTime)</td>
-                    <td class="mono">@(h.LogoffTime.HasValue ? Horario.Fmt(h.LogoffTime.Value) : "Ativa")</td>
-                    <td class="mono">@Horas(RelatorioService.Duracao(h))</td>
-                    <td class="mono">
-                        @if (qtdDesc == 0)
-                        {
-                            <span>—</span>
-                        }
-                        else
-                        {
-                            <span>@qtdDesc</span>
-                            <span class="sub-label">@Curta(RelatorioService.TempoDesconectado(h)) fora</span>
-                        }
+                    <td class="mono">@l.TextoOrigem</td>
+                    <td class="mono">@l.TextoDuracao</td>
+                    <td class="evento-status">
+                        <span class="status-dot @CorEvento(l.Tipo)"></span>
+                        <strong>@l.Status</strong>
                     </td>
-                    <td>@(h.LogoffReason ?? "—") @(h.AdminUsername is not null ? $"({h.AdminUsername})" : "")</td>
+                    <td>@l.TextoDetalhe</td>
                 </tr>
-
-                @if (aberta)
-                {
-                    <tr class="row-detail">
-                        <td colspan="10">
-                            <table class="data-table nested">
-                                <thead>
-                                    <tr>
-                                        <th>Data/hora</th>
-                                        <th>Evento</th>
-                                        <th>Motivo</th>
-                                        <th>Origem</th>
-                                        <th>Ficou desconectada</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    @foreach (var (ev, fora) in LinhaDoTempo(h))
-                                    {
-                                        <tr>
-                                            <td class="mono">@Horario.Fmt(ev.DataHora, "dd/MM/yyyy HH:mm:ss")</td>
-                                            <td>
-                                                @if (ev.Tipo == SessionEventType.Desconexao)
-                                                {
-                                                    <span><span class="status-dot disconnected"></span> Desconexão</span>
-                                                }
-                                                else
-                                                {
-                                                    <span><span class="status-dot active"></span> Reconexão</span>
-                                                }
-                                            </td>
-                                            <td>@ev.Motivo</td>
-                                            <td class="mono">@(ev.ClientIp ?? "—")</td>
-                                            <td class="mono">@(fora is { } t ? Duracao(t) : "")</td>
-                                        </tr>
-                                    }
-                                </tbody>
-                            </table>
-                        </td>
-                    </tr>
-                }
             }
         </tbody>
     </table>
 }
 else if (!carregando)
 {
-    <p class="dash-note">Nenhuma sessão encontrada com esses filtros. Os dados aparecem assim que o agente estiver instalado.</p>
+    <p class="dash-note">Nenhum evento encontrado com esses filtros. Os dados aparecem assim que o agente estiver instalado.</p>
 }
 
 @code {
@@ -224,7 +166,10 @@ else if (!carregando)
     private bool carregando;
     private List<string> servidores = new();
     private List<string> clientes   = new();
-    private readonly HashSet<int> abertas = new();
+    private List<LinhaEvento> linhas = new();
+    private bool incluirSecundarios;
+    private bool maisRecentes;
+    private const int LimiteTela = 2000;
 
     protected override async Task OnInitializedAsync()
     {
@@ -243,7 +188,7 @@ else if (!carregando)
         StateHasChanged();
         (itens, truncado) = await RelatorioService.PesquisarHistoricoAsync(filtro);
         resumo = RelatorioService.Resumir(itens);
-        abertas.Clear();
+        MontarLinhas();
         carregando = false;
     }
 
@@ -259,28 +204,19 @@ else if (!carregando)
         if (e.Key == "Enter") await PesquisarAsync();
     }
 
-    private void Alternar(int id)
+    private void MontarLinhas()
     {
-        if (!abertas.Remove(id)) abertas.Add(id);
+        linhas = RelatorioService.Eventos(itens, Horario.ParaUtc(periodo.DeLocal), Horario.ParaUtc(periodo.AteLocal), incluirSecundarios);
+        if (maisRecentes) linhas.Reverse();
     }
 
-    /// <summary>Eventos em ordem, e em cada reconexão quanto tempo a sessão ficou fora.</summary>
-    private static IEnumerable<(SessionEvent Ev, TimeSpan? Fora)> LinhaDoTempo(SessionHistory h)
+    private static string CorEvento(SessionEventType t) => t switch
     {
-        DateTime? desde = null;
-        foreach (var e in h.Eventos.OrderBy(e => e.DataHora))
-        {
-            TimeSpan? fora = null;
-            if (e.Tipo == SessionEventType.Desconexao)
-                desde ??= e.DataHora;
-            else if (desde is { } ini)
-            {
-                fora  = e.DataHora - ini;
-                desde = null;
-            }
-            yield return (e, fora);
-        }
-    }
+        SessionEventType.Logon or SessionEventType.Reconexao => "active",
+        SessionEventType.Desconexao                          => "disconnected",
+        SessionEventType.Logoff                              => "idle",
+        _                                                    => "",
+    };
 
     private string Url(string arquivo)
     {
@@ -292,6 +228,8 @@ else if (!carregando)
         Add("cliente",  filtro.Cliente);
         Add("usuario",  filtro.Usuario);
         Add("situacao", filtro.Situacao);
+        if (incluirSecundarios) Add("secundarios", "1");
+        if (maisRecentes)       Add("ordem", "recentes");
         return $"/api/relatorios/{arquivo}" + (q.Count > 0 ? "?" + string.Join("&", q) : "");
     }
 
@@ -300,7 +238,4 @@ else if (!carregando)
     /// <summary>Tempo curto (quedas de conexão): segundos quando for menos de uma hora.</summary>
     private static string Curta(TimeSpan d) => d.TotalHours >= 1 ? Horas(d) : $"{(int)d.TotalMinutes}m {d.Seconds:D2}s";
 
-    private static string Duracao(TimeSpan d) => d.TotalMinutes >= 1
-        ? $"{(int)d.TotalHours}h {d.Minutes:D2}m {d.Seconds:D2}s"
-        : $"{d.Seconds}s";
 }

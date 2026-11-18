@@ -23,7 +23,25 @@
 </head>
 <body>
     <Routes />
-    <script src="_framework/blazor.web.js"></script>
+
+    @* Aviso de conexão das telas interativas. O Blazor troca as classes
+       components-reconnect-show / -failed / -rejected; o js/reconexao.js
+       reconecta ou recarrega a página sozinho, sem precisar de F5. *@
+    <div id="components-reconnect-modal" class="rds-reconexao" role="status" aria-live="polite">
+        <div class="rds-reconexao-faixa">
+            <i class="fa-solid fa-plug-circle-exclamation"></i>
+            <span class="rds-reconexao-show">
+                Conexão com o servidor perdida. Reconectando…
+                <small>(tentativa <span id="components-reconnect-current-attempt"></span> de <span id="components-reconnect-max-retries"></span>)</small>
+            </span>
+            <span class="rds-reconexao-failed">Servidor indisponível. A página será recarregada assim que ele voltar…</span>
+            <span class="rds-reconexao-rejected">Atualizando a página…</span>
+            <button type="button" class="rds-reconexao-btn" onclick="location.reload()">Recarregar agora</button>
+        </div>
+    </div>
+
+    <script src="_framework/blazor.web.js" autostart="false"></script>
+    <script src="js/reconexao.js?v=@VersaoJs"></script>
     <script src="js/site.js?v=@VersaoJs"></script>
 </body>
 </html>
@@ -38,5 +56,6 @@
 
     private static string? versaoJs;
     private string VersaoJs => versaoJs ??=
-        File.GetLastWriteTimeUtc(Path.Combine(Env.WebRootPath, "js", "site.js")).Ticks.ToString("x");
+        Directory.GetFiles(Path.Combine(Env.WebRootPath, "js"), "*.js")
+                 .Max(f => File.GetLastWriteTimeUtc(f)).Ticks.ToString("x");
 }

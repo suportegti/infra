@@ -64,7 +64,7 @@ Para instalar o portal e os agentes em Windows Server, veja
 [docs/IMPLANTACAO.md](docs/IMPLANTACAO.md). Em resumo:
 
 ```powershell
-.\deploy\build-pacotes.ps1 -Versao 1.5.0     # gera dist\RDSMonitor.Web-*.zip e dist\RDSMonitor.Agent-*.zip
+.\deploy\build-pacotes.ps1 -Versao 1.6.0     # gera dist\RDSMonitor.Web-*.zip e dist\RDSMonitor.Agent-*.zip
 # no servidor do portal:      .\install-web.ps1 -SenhaAdmin "..."
 # em cada servidor RDS:       .\install-agent.ps1 -ServidorWeb <ip-ou-dns> -ApiKey "..."
 ```
@@ -177,28 +177,64 @@ hora de início e fim, com atalhos: última hora, hoje, ontem, 7 e 30 dias),
 cliente, servidor, usuário/máquina/IP e situação (inclusive *Com desconexões*).
 Entram as sessões que estiveram abertas em algum momento do período. O resumo
 traz total de sessões, usuários distintos, pico simultâneo, tempo total/médio,
-desconexões, conexões perdidas e tempo desconectado. **Exportar sessões** e
-**Exportar desconexões** geram .xlsx com os mesmos filtros.
+desconexões, conexões perdidas e tempo desconectado.
 
-### Desconexões e reconexões (1.5.0)
+### Histórico guiado pelos eventos do Windows (1.6.0)
 
-O agente lê do log do Windows *TerminalServices-LocalSessionManager/Operational*
-os eventos **24** (sessão desconectada) e **25** (reconexão), e o **40** para o
-motivo. Cada sessão do relatório tem uma linha do tempo (seta à esquerda) com o
-horário, o motivo e quanto tempo ficou fora. Motivos mais comuns:
+O agente lê o ciclo de vida das sessões nos logs *TerminalServices* do servidor
+e o portal monta o histórico a partir dele:
 
-| Código (evento 40) | Exibido como |
+| Evento | Log | Uso no histórico |
+|---|---|---|
+| 1149 | RemoteConnectionManager/Operational | Autenticação RDP aceita (usuário e IP de origem) |
+| 21 | LocalSessionManager/Operational | **Início** da sessão — abre o registro, inclusive de sessões curtas que o heartbeat não chegou a ver |
+| 22 | LocalSessionManager/Operational | Área de trabalho (shell) carregada |
+| 24 | LocalSessionManager/Operational | Desconexão (a sessão continua aberta) |
+| 25 | LocalSessionManager/Operational | Reconexão a uma sessão existente |
+| 23 | LocalSessionManager/Operational | **Fim** da sessão — o logoff fica com o horário exato do Windows |
+| 39 / 40 | LocalSessionManager/Operational | Quem pediu a desconexão (39) e o código do motivo (40) |
+
+Na tela, **cada evento é um registro (uma linha)**, em ordem cronológica — o
+logon continua registrado mesmo depois de desconexões e do logoff:
+
+```
+08:00  LOGON        Logon da sessão concluído (evento 21)
+12:00  DESCONEXÃO   Queda de conexão (rede, VPN ou cliente RDP fechado)
+13:00  RECONEXÃO    Voltou para a sessão aberta            1h 00m fora
+18:00  LOGOFF       Logoff                                 10h 00m sessão
+```
+
+A coluna **Status** mostra o evento da linha e o **Detalhe**, o motivo ou quem
+desconectou. Autenticação (1149) e área de trabalho (22) aparecem marcando
+*Mostrar autenticação e área de trabalho*. Sessões gravadas antes dos eventos
+(agente até 1.5.0) mostram LOGON e LOGOFF pelos horários de login e logoff,
+marcados com um relógio. **Exportar Excel** é o espelho da tabela: as mesmas
+linhas, ordem e opções marcadas na tela, com as colunas Data/hora, Servidor,
+Usuário, Sessão, Hostname, IP, Duração, Status e Detalhe (a Origem da tela sai em
+duas colunas para facilitar filtros e análises).
+
+Internamente, cada sessão guarda também o seu estado atual, que acompanha esse ciclo:
+
+| Status | Quando |
 |---|---|
-| 0 | Conexão perdida (rede ou cliente fechado) |
-| 1 | Desconectada por ferramenta administrativa (ex.: Disconnect pelo portal) |
-| 3 | Tempo ocioso excedido |
-| 5 | Substituída por outra conexão |
-| 11 | Usuário desconectou |
-| 12 | Usuário fez logoff |
+| Conectado | logon (evento 21) |
+| Queda de conexão | desconexão com motivo 0 (rede, VPN, cliente RDP fechado no X) |
+| Desconectado pelo usuário | o evento 39 diz que a própria sessão pediu (o usuário clicou em *Desconectar*) |
+| Desconectado pelo administrador (login) | Disconnect pelo portal (casado com a auditoria) ou pedido a partir de outra sessão (evento 39 — mostra o usuário dessa sessão) |
+| Desconectado por ferramenta administrativa | pedido por um serviço do servidor (sessão 0) fora do portal |
+| Reconectado | o usuário voltou para a sessão (evento 25) |
+| Logoff / Logoff pelo administrador (login) | sessão encerrada (evento 23); "pelo administrador" se o Logoff veio do portal |
 
-O Windows registra "0" tanto para queda de rede quanto para o cliente RDP
-fechado no X. Se o heartbeat falhar, o agente reenvia os eventos no ciclo
-seguinte e o portal descarta duplicados.
+O Windows registra a queda de rede e o cliente RDP fechado no X da mesma forma
+(motivo 0, sem evento 39). Se o heartbeat falhar, o agente reenvia os eventos no
+ciclo seguinte e o portal descarta duplicados. Agentes 1.5.0 continuam
+funcionando, mas enviam só desconexões e reconexões.
+
+Para testar no modo de simulação do agente, grave em
+`src/RDSMonitor.Agent/simulacao.txt` uma instrução por linha (o agente lê e
+apaga o arquivo em até 2 s): `queda ana.teste 180` (queda de rede, volta em
+180 s), `desconectar ana.teste 60` (o usuário clica em Desconectar),
+`reconectar ana.teste` ou `logoff ana.teste 120` (sai e entra de novo em 120 s).
 
 ## Sessões
 

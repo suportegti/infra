@@ -17,6 +17,38 @@ public sealed class FiltroRelatorio
     public int Limite         { get; set; } = 1000;
 }
 
+/// <summary>
+/// Uma linha do histórico = um evento da sessão (LOGON, DESCONEXÃO, RECONEXÃO,
+/// LOGOFF...). <see cref="Registrado"/> = falso quando a linha foi montada a
+/// partir do horário de login/logoff da sessão, porque o agente da época não
+/// enviava os eventos do Windows.
+/// </summary>
+public sealed record LinhaEvento(
+    DateTime DataHora,                 // UTC
+    SessionEventType Tipo,
+    string Status,                     // LOGON, DESCONEXÃO, RECONEXÃO, LOGOFF...
+    string Detalhe,
+    SessionHistory Sessao,
+    string? Ip,
+    TimeSpan? Duracao,                 // reconexão: tempo fora · logoff: duração da sessão
+    string? Administrador,
+    bool Registrado)
+{
+    // Textos usados igualmente na tela e no Excel (a planilha é o espelho da tabela)
+    public string TextoServidor => Sessao.Cliente is null ? Sessao.ServerName : $"{Sessao.ServerName} ({Sessao.Cliente})";
+    public string? IpOrigem     => Ip ?? Sessao.ClientIp;
+    public string TextoOrigem   => string.Join(" · ", new[] { Sessao.ClientName, IpOrigem }.Where(x => !string.IsNullOrWhiteSpace(x)))
+                                   is { Length: > 0 } t ? t : "—";
+    public string TextoDuracao  => Duracao is { } d
+        ? $"{FormatarDuracao(d)} {(Tipo == SessionEventType.Reconexao ? "fora" : "de sessão")}"
+        : "";
+    public string TextoDetalhe  => Administrador is null ? Detalhe : $"{Detalhe} ({Administrador})";
+
+    public static string FormatarDuracao(TimeSpan d) => d.TotalMinutes >= 1
+        ? $"{(int)d.TotalHours}h {d.Minutes:D2}m {d.Seconds:D2}s"
+        : $"{d.Seconds}s";
+}
+
 public sealed record ResumoRelatorio(
     int Sessoes, int Usuarios, TimeSpan TempoTotal, TimeSpan TempoMedio, int PicoSimultaneo,
     int Desconexoes = 0, int QuedasDeConexao = 0, TimeSpan TempoDesconectado = default);
@@ -31,9 +63,16 @@ public interface IRelatorioService
     TimeSpan Duracao(SessionHistory h);
     /// <summary>Quantidade de desconexões (evento 24) da sessão.</summary>
     int Desconexoes(SessionHistory h);
-    /// <summary>Tempo somado em que a sessão ficou desconectada (de cada 24 até o 25 seguinte, ou até o fim).</summary>
+    /// <summary>Tempo somado em que a sessão ficou desconectada (de cada 24 até o 25/23 seguinte, ou até o fim).</summary>
     TimeSpan TempoDesconectado(SessionHistory h);
     ResumoRelatorio Resumir(IReadOnlyCollection<SessionHistory> itens);
+
+    /// <summary>
+    /// Um registro por evento das sessões, dentro do período (UTC), em ordem
+    /// cronológica. Autenticação (1149) e área de trabalho (22) só com
+    /// <paramref name="incluirSecundarios"/>.
+    /// </summary>
+    List<LinhaEvento> Eventos(IEnumerable<SessionHistory> sessoes, DateTime? deUtc, DateTime? ateUtc, bool incluirSecundarios);
 }
 
 public class RelatorioService : IRelatorioService
@@ -123,7 +162,7 @@ public class RelatorioService : IRelatorioService
         {
             if (e.Tipo == SessionEventType.Desconexao)
                 desde ??= e.DataHora;
-            else if (desde is { } ini)
+            else if (e.Tipo is SessionEventType.Reconexao or SessionEventType.Logoff && desde is { } ini)
             {
                 total += e.DataHora - ini;
                 desde = null;
@@ -162,5 +201,72 @@ public class RelatorioService : IRelatorioService
                    desconexoes.Count,
                    desconexoes.Count(e => e.MotivoCodigo == 0),
                    TimeSpan.FromTicks(itens.Sum(h => TempoDesconectado(h).Ticks)));
+    }
+
+    public List<LinhaEvento> Eventos(IEnumerable<SessionHistory> sessoes, DateTime? deUtc, DateTime? ateUtc, bool incluirSecundarios)
+    {
+        var linhas = new List<LinhaEvento>();
+        foreach (var h in sessoes)
+        {
+            var eventos = h.Eventos.OrderBy(e => e.DataHora).ToList();
+
+            // Sessões de agentes antigos (sem o evento 21/23): LOGON e LOGOFF vêm do próprio histórico
+            if (!eventos.Any(e => e.Tipo == SessionEventType.Logon))
+                linhas.Add(new(h.LogonTime, SessionEventType.Logon, "LOGON", "Logon da sessão",
+                    h, h.ClientIp, null, null, Registrado: false));
+
+            DateTime? desde = null;
+            foreach (var e in eventos)
+            {
+                TimeSpan? duracao = null;
+                if (e.Tipo == SessionEventType.Desconexao)
+                    desde ??= e.DataHora;
+                else if (e.Tipo is SessionEventType.Reconexao or SessionEventType.Logoff && desde is { } ini)
+                {
+                    if (e.Tipo == SessionEventType.Reconexao) duracao = e.DataHora - ini;
+                    desde = null;
+                }
+
+                if (!incluirSecundarios && e.Tipo is SessionEventType.Shell or SessionEventType.Autenticacao)
+                    continue;
+
+                if (e.Tipo == SessionEventType.Logoff)
+                {
+                    linhas.Add(LinhaLogoff(h, e.DataHora, registrado: true));
+                    continue;
+                }
+
+                var detalhe = e.Tipo switch
+                {
+                    SessionEventType.Desconexao => StatusSessao.DeEvento(e)?.Texto switch
+                    {
+                        StatusSessao.Queda                         => "Queda de conexão (rede, VPN ou cliente RDP fechado)",
+                        { } st when st != StatusSessao.Desconectado => st,
+                        _                                          => e.Motivo,
+                    },
+                    SessionEventType.Reconexao  => "Voltou para a sessão aberta",
+                    _                           => e.Motivo,
+                };
+                var admin = e.Tipo == SessionEventType.Desconexao ? StatusSessao.DeEvento(e)?.Quem : null;
+                linhas.Add(new(e.DataHora, e.Tipo, e.Nome.ToUpperInvariant(), detalhe, h, e.ClientIp, duracao, admin, Registrado: true));
+            }
+
+            if (h.LogoffTime is { } fim && !eventos.Any(e => e.Tipo == SessionEventType.Logoff))
+                linhas.Add(LinhaLogoff(h, fim, registrado: false));
+        }
+
+        return linhas
+            .Where(l => (deUtc is null || l.DataHora >= deUtc) && (ateUtc is null || l.DataHora <= ateUtc))
+            .OrderBy(l => l.DataHora)
+            .ThenBy(l => l.Tipo == SessionEventType.Logoff ? 1 : 0)
+            .ToList();
+    }
+
+    private LinhaEvento LinhaLogoff(SessionHistory h, DateTime quando, bool registrado)
+    {
+        var texto = StatusSessao.Exibir(h.LogoffReason);
+        var detalhe = texto is StatusSessao.Logoff or StatusSessao.LogoffAdministrador ? texto : StatusSessao.Logoff;
+        return new(quando, SessionEventType.Logoff, "LOGOFF", detalhe, h, null,
+            Duracao(h), texto == StatusSessao.LogoffAdministrador ? h.AdminUsername : null, registrado);
     }
 }

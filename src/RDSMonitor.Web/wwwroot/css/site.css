@@ -1553,3 +1553,60 @@ mark.hl {
 /* Esconde o "olho" nativo do Edge para não aparecer dois */
 .field-senha input::-ms-reveal,
 .field-senha input::-ms-clear { display: none; }
+
+/* ── Aviso de reconexão (substitui a tela esbranquiçada do Blazor) ─ */
+.rds-reconexao { display: none; }
+.rds-reconexao.components-reconnect-show,
+.rds-reconexao.components-reconnect-failed,
+.rds-reconexao.components-reconnect-rejected,
+.rds-reconexao.rds-recarregando {
+    display: block;
+    position: fixed;
+    top: 0.75rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 2000;
+    max-width: calc(100vw - 2rem);
+}
+.rds-reconexao-faixa {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    padding: 0.55rem 0.9rem;
+    border-radius: 10px;
+    background: var(--surface);
+    border: 1px solid var(--accent);
+    color: var(--text);
+    font-size: 0.85rem;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+}
+.rds-reconexao-faixa > i { color: var(--accent); }
+.rds-reconexao-faixa small { color: var(--text-muted); }
+.rds-reconexao-show, .rds-reconexao-failed, .rds-reconexao-rejected { display: none; }
+.components-reconnect-show .rds-reconexao-show { display: inline; }
+.components-reconnect-failed .rds-reconexao-failed { display: inline; }
+.components-reconnect-rejected .rds-reconexao-rejected,
+.rds-recarregando .rds-reconexao-rejected { display: inline; }
+.rds-recarregando .rds-reconexao-show,
+.rds-recarregando .rds-reconexao-failed { display: none; }
+.rds-reconexao-btn {
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    border-radius: 999px;
+    padding: 0.2rem 0.7rem;
+    font-size: 0.78rem;
+    cursor: pointer;
+}
+.rds-reconexao-btn:hover { border-color: var(--accent); }
+
+/* Linha do tempo: eventos secundários (autenticação, área de trabalho) mais discretos */
+.data-table.nested tr.row-secundaria td { color: var(--text-muted); font-size: 0.8rem; }
+.data-table.nested tr.row-secundaria strong { font-weight: 500; }
+
+/* Relatórios: um evento por linha */
+.relatorio-opcoes { margin: 0.25rem 0 0.25rem; gap: 1.25rem; }
+.relatorio-eventos td.evento-status { white-space: nowrap; }
+.relatorio-eventos tr.row-secundaria td { color: var(--text-muted); font-size: 0.8rem; }
+.relatorio-eventos tr.row-secundaria strong { font-weight: 500; }

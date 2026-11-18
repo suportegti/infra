@@ -112,7 +112,23 @@ builder.Services.AddHostedService<ServerHealthMonitor>();
 // Interatividade no servidor (SignalR): necessária para @onclick, @bind e
 // para os timers de atualização automática das telas de monitoramento.
 builder.Services.AddRazorComponents()
-    .AddInteractiveServerComponents();
+    .AddInteractiveServerComponents(o =>
+    {
+        // Tela que perdeu a conexão (rede, VPN, notebook suspenso) continua
+        // guardada no servidor por 10 min, para reconectar sem perder o estado.
+        o.DisconnectedCircuitRetentionPeriod = TimeSpan.FromMinutes(10);
+        o.DisconnectedCircuitMaxRetained     = 500;
+    })
+    .AddHubOptions(o =>
+    {
+        // Abas em segundo plano têm os timers atrasados pelo navegador: o sinal de
+        // vida do cliente pode demorar. Com 30 s (padrão) o servidor derrubava a
+        // conexão de telas de monitoramento abertas numa aba escondida.
+        // Deve ser o dobro do intervalo de keep-alive do cliente (js/site.js).
+        o.ClientTimeoutInterval = TimeSpan.FromMinutes(2);
+        o.KeepAliveInterval     = TimeSpan.FromSeconds(15);
+        o.HandshakeTimeout      = TimeSpan.FromSeconds(30);
+    });
 
 var app = builder.Build();
 
@@ -362,7 +378,7 @@ app.MapGet("/api/auditoria/xlsx", async (IAuditoriaService auditoria, HttpReques
     })
     .RequireAuthorization(Permissoes.AuditoriaVer);
 
-// GET /api/relatorios/sessoes.xlsx  e  /api/relatorios/desconexoes.xlsx (mesmos filtros da tela)
+// GET /api/relatorios/eventos.xlsx (mesmos filtros e opções da tela Relatórios)
 static Task<(List<SessionHistory>, bool)> PesquisarRelatorioAsync(IRelatorioService relatorios, HttpRequest req)
 {
     var q = req.Query;
@@ -375,52 +391,30 @@ static Task<(List<SessionHistory>, bool)> PesquisarRelatorioAsync(IRelatorioServ
     });
 }
 
-app.MapGet("/api/relatorios/sessoes.xlsx", async (IRelatorioService relatorios, HttpRequest req) =>
+app.MapGet("/api/relatorios/eventos.xlsx", async (IRelatorioService relatorios, HttpRequest req) =>
     {
+        // Espelho da tabela da tela Relatórios (mesmas linhas, ordem e textos); a Origem
+        // sai em duas colunas, Hostname e IP, para facilitar filtros e análises no Excel
         var (itens, _) = await PesquisarRelatorioAsync(relatorios, req);
-        var colunas = new XlsxColuna[]
-        {
-            new("Cliente", Largura: 18), new("Servidor", Largura: 16), new("Usuário", Largura: 24),
-            new("Máquina de origem", Largura: 20), new("IP de origem", Largura: 16), new("Sessão", XlsxTipo.Numero, 9),
-            new("Login", XlsxTipo.DataHora, 20), new("Logoff", XlsxTipo.DataHora, 20),
-            new("Situação", Largura: 12), new("Duração (h:mm)", XlsxTipo.Duracao, 15),
-            new("Desconexões", XlsxTipo.Numero, 13), new("Tempo desconectado (h:mm)", XlsxTipo.Duracao, 22),
-            new("Encerramento", Largura: 14), new("Encerrado por", Largura: 18),
-        };
-        var linhas = itens.Select(h => new object?[]
-        {
-            h.Cliente, h.ServerName, h.Username, h.ClientName, h.ClientIp, h.RdsSessionId,
-            Horario.Br(h.LogonTime), Horario.Br(h.LogoffTime),
-            h.LogoffTime is null ? "Ativa" : "Encerrada", relatorios.Duracao(h),
-            relatorios.Desconexoes(h), relatorios.TempoDesconectado(h),
-            h.LogoffReason, h.AdminUsername,
-        });
-        return Results.File(Xlsx.Gerar("Sessões", colunas, linhas), Xlsx.ContentType,
-            $"historico-sessoes-{Horario.Agora:yyyyMMdd-HHmm}.xlsx");
-    })
-    .RequireAuthorization(Permissoes.RelatoriosVer);
+        var linhasEventos = relatorios.Eventos(itens,
+            Horario.ParaUtc(DataLocal(req.Query["de"])), Horario.ParaUtc(DataLocal(req.Query["ate"])),
+            incluirSecundarios: req.Query["secundarios"] == "1");
+        if (req.Query["ordem"] == "recentes") linhasEventos.Reverse();
 
-app.MapGet("/api/relatorios/desconexoes.xlsx", async (IRelatorioService relatorios, HttpRequest req) =>
-    {
-        var (itens, _) = await PesquisarRelatorioAsync(relatorios, req);
         var colunas = new XlsxColuna[]
         {
-            new("Data/hora", XlsxTipo.DataHora, 20), new("Evento", Largura: 13), new("Motivo", Largura: 40),
-            new("Código do motivo", XlsxTipo.Numero, 16), new("Cliente", Largura: 18), new("Servidor", Largura: 16),
-            new("Usuário", Largura: 24), new("Sessão", XlsxTipo.Numero, 9), new("IP de origem", Largura: 16),
-            new("Login da sessão", XlsxTipo.DataHora, 20),
+            new("Data/hora", XlsxTipo.DataHora, 20), new("Servidor", Largura: 24), new("Usuário", Largura: 24),
+            new("Sessão", XlsxTipo.Numero, 9), new("Hostname", Largura: 20), new("IP", Largura: 16),
+            new("Duração", Largura: 22),
+            new("Status", Largura: 16), new("Detalhe", Largura: 60),
         };
-        var linhas = itens
-            .SelectMany(h => h.Eventos.Select(e => (h, e)))
-            .OrderBy(x => x.e.DataHora)
-            .Select(x => new object?[]
-            {
-                Horario.Br(x.e.DataHora), x.e.Tipo == SessionEventType.Desconexao ? "Desconexão" : "Reconexão",
-                x.e.Motivo, x.e.MotivoCodigo, x.h.Cliente, x.h.ServerName, x.e.Username, x.e.RdsSessionId,
-                x.e.ClientIp, Horario.Br(x.h.LogonTime),
-            });
-        return Results.File(Xlsx.Gerar("Desconexões", colunas, linhas), Xlsx.ContentType,
-            $"desconexoes-{Horario.Agora:yyyyMMdd-HHmm}.xlsx");
+        var linhas = linhasEventos.Select(l => new object?[]
+        {
+            Horario.Br(l.DataHora), l.TextoServidor, l.Sessao.Username, l.Sessao.RdsSessionId,
+            l.Sessao.ClientName, l.IpOrigem, l.TextoDuracao, l.Status, l.TextoDetalhe,
+        });
+        return Results.File(Xlsx.Gerar("Histórico de sessões", colunas, linhas), Xlsx.ContentType,
+            $"historico-sessoes-{Horario.Agora:yyyyMMdd-HHmm}.xlsx");
     })
     .RequireAuthorization(Permissoes.RelatoriosVer);
 
