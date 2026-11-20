@@ -66,6 +66,24 @@ public class ApiClient
         }
     }
 
+    /// <summary>
+    /// Avisa o portal que o agente está sendo encerrado (serviço parado,
+    /// desinstalação, atualização), para o servidor aparecer offline na hora.
+    /// </summary>
+    public async Task AvisarEncerramentoAsync()
+    {
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+            await _http.PostAsync($"api/agent/offline/{Uri.EscapeDataString(_settings.ServerName)}", null, cts.Token);
+            _log.LogInformation("Portal avisado do encerramento do agente.");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            _log.LogWarning("Não foi possível avisar o portal do encerramento: {Msg}", ex.Message);
+        }
+    }
+
     /// <summary>Baixa um arquivo do portal (com a chave do agente) para <paramref name="destino"/>.</summary>
     public async Task BaixarAsync(string url, string destino, CancellationToken ct)
     {

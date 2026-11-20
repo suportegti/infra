@@ -1,11 +1,13 @@
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using RDSMonitor.Web.Components;
 using RDSMonitor.Web.Data;
 using RDSMonitor.Web.Data.Entities;
+using RDSMonitor.Web.Models;
 using RDSMonitor.Web.Models.Dtos;
 using RDSMonitor.Web.Security;
 using RDSMonitor.Web.Services;
@@ -34,6 +36,17 @@ var connectionString = ResolverCaminhoSqlite(
 
 builder.Services.AddDbContext<AppDbContext>(o => o.UseSqlite(connectionString));
 
+// Pasta de dados (a do banco: data\ na instalação), preservada pelo instalador nas atualizações
+var pastaDados = Path.GetDirectoryName(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(connectionString).DataSource)
+                 ?? builder.Environment.ContentRootPath;
+
+// Chaves de criptografia (cookies de login e segredos da tela Configurações) em data\chaves,
+// protegidas pelo DPAPI da máquina — sobrevivem a reinstalações e a troca da conta do serviço.
+var protecao = builder.Services.AddDataProtection()
+    .SetApplicationName("RDSMonitor")
+    .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(pastaDados, "chaves")));
+if (OperatingSystem.IsWindows()) protecao.ProtectKeysWithDpapi(protectToLocalMachine: true);
+
 // ── Windows Service ───────────────────────────────────────────────────────────
 // Sem efeito quando executado no console (dotnet run). Como serviço, o log vai
 // para o Visualizador de Eventos (fonte "RDSMonitor.Web").
@@ -48,7 +61,25 @@ builder.Services
         o.AccessDeniedPath   = "/acesso-negado";
         o.ExpireTimeSpan     = TimeSpan.FromHours(8);
         o.SlidingExpiration  = true;
+    })
+    // Login com Microsoft 365 (Entra ID). Tenant, aplicativo e chave vêm da tela
+    // Configurações (ConfigurarMicrosoft365). Exige o portal em HTTPS (ou localhost).
+    .AddOpenIdConnect(ConfigurarMicrosoft365.Esquema, "Microsoft 365", o =>
+    {
+        o.SignInScheme       = CookieAuthenticationDefaults.AuthenticationScheme;
+        o.CallbackPath       = "/signin-oidc";
+        o.ResponseType       = Microsoft.IdentityModel.Protocols.OpenIdConnect.OpenIdConnectResponseType.Code;
+        o.UsePkce            = true;
+        o.SaveTokens         = false;
+        o.MapInboundClaims   = false;
+        o.Scope.Clear();
+        o.Scope.Add("openid");
+        o.Scope.Add("profile");
+        o.Scope.Add("email");
+        o.Events.OnTokenValidated = Microsoft365Login.AoValidarTokenAsync;
+        o.Events.OnRemoteFailure  = Microsoft365Login.AoFalharAsync;
     });
+builder.Services.AddSingleton<Microsoft.Extensions.Options.IConfigureOptions<Microsoft.AspNetCore.Authentication.OpenIdConnect.OpenIdConnectOptions>, ConfigurarMicrosoft365>();
 
 // Uma policy por permissão (Security/Permissoes.cs); as permissões de cada
 // perfil são configuradas na tela "Perfis de usuários".
@@ -68,13 +99,13 @@ builder.Services.AddScoped<IAuditoriaService, AuditoriaService>();
 builder.Services.AddScoped<IRelatorioService, RelatorioService>();
 builder.Services.AddScoped<IAutenticacaoService, AutenticacaoService>();
 builder.Services.AddScoped<IAtualizacaoAgenteService, AtualizacaoAgenteService>();
+builder.Services.AddScoped<IConfiguracaoService, ConfiguracaoService>();
+builder.Services.AddScoped<IEmailService, EmailService>();
+builder.Services.AddScoped<IRecuperacaoSenhaService, RecuperacaoSenhaService>();
 
 // Pacotes do agente para a atualização automática: ao lado do banco (data\pacotes-agente),
 // que o instalador do portal preserva nas atualizações.
-builder.Services.AddSingleton(new PastaPacotesAgente(Path.Combine(
-    Path.GetDirectoryName(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(connectionString).DataSource)
-        ?? builder.Environment.ContentRootPath,
-    "pacotes-agente")));
+builder.Services.AddSingleton(new PastaPacotesAgente(Path.Combine(pastaDados, "pacotes-agente")));
 
 // Quem está usando o portal agora (tela Usuários do sistema)
 builder.Services.AddSingleton<PresencaService>();
@@ -183,19 +214,15 @@ app.MapPost("/api/auth/login", async (
             return Results.Redirect($"/login?erro=bloqueio&min={resultado.BloqueioMinutos}");
         if (resultado.Status == AuthStatus.TrocaDeSenhaExigida && resultado.Usuario is { } pendente)
             return Results.Redirect($"/alterar-senha?obrigatoria=1&usuario={Uri.EscapeDataString(pendente.Username)}");
+        if (resultado.Status == AuthStatus.SenhaExpirada && resultado.Usuario is { } vencida)
+            return Results.Redirect($"/alterar-senha?obrigatoria=1&motivo=expirada&usuario={Uri.EscapeDataString(vencida.Username)}");
+        if (resultado.Status == AuthStatus.UsarMicrosoft365)
+            return Results.Redirect("/login?erro=usar-m365");
         if (resultado.Status != AuthStatus.Sucesso || resultado.Usuario is null)
             return Results.Redirect("/login?erro=1");
 
         var user = resultado.Usuario;
-        var claims = new List<Claim>
-        {
-            new(ClaimTypes.NameIdentifier, user.Id.ToString()),
-            new(ClaimTypes.Name,           user.DisplayName),
-            new(ClaimTypes.Role,           user.Perfil?.Nome ?? "Sem perfil"),
-            new("username",                user.Username),
-        };
-        var identity  = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
-        var principal = new ClaimsPrincipal(identity);
+        var principal = SessaoPortal.Principal(user, "Local");
 
         await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal);
         http.RequestServices.GetRequiredService<PresencaService>().Entrou(user.Username, user.DisplayName, ip);
@@ -205,14 +232,47 @@ app.MapPost("/api/auth/login", async (
             return Results.Redirect(returnUrl);
 
         // Primeira página que o perfil pode abrir
-        var perms = await http.RequestServices.GetRequiredService<IPermissaoService>().DoUsuarioAsync(principal);
-        var inicio = new[]
+        return Results.Redirect(await SessaoPortal.PaginaInicialAsync(http.RequestServices, principal));
+    })
+    .DisableAntiforgery()
+    .RequireRateLimiting("login");
+
+// GET /api/auth/m365 — botão "Entrar com Microsoft 365" da tela de login
+app.MapGet("/api/auth/m365", async (HttpContext http, IConfiguracaoService config, ILogger<Program> log) =>
+    {
+        var m365 = await config.M365Async();
+        if (!m365.LoginHabilitado || !m365.Configurado)
+            return Results.Redirect("/login?erro=m365-desligado");
+        try
         {
-            (Permissoes.DashboardVer, "/"), (Permissoes.SessoesVer, "/sessoes"), (Permissoes.ServidoresVer, "/servidores"),
-            (Permissoes.RelatoriosVer, "/relatorios"), (Permissoes.AuditoriaVer, "/auditoria"),
-            (Permissoes.UsuariosGerenciar, "/usuarios"), (Permissoes.PerfisGerenciar, "/perfis-usuarios"),
-        }.FirstOrDefault(x => perms.Contains(x.Item1)).Item2 ?? "/acesso-negado";
-        return Results.Redirect(inicio);
+            // Busca a configuração do Tenant na Microsoft e redireciona para o login de lá
+            await http.ChallengeAsync(ConfigurarMicrosoft365.Esquema, new AuthenticationProperties { RedirectUri = "/inicio" });
+            return Results.Empty;
+        }
+        catch (Exception ex)
+        {
+            log.LogError(ex, "Não foi possível iniciar o login Microsoft 365 (Tenant {Tenant}).", m365.TenantId);
+            return Results.Redirect("/login?erro=m365");
+        }
+    })
+    .RequireRateLimiting("login");
+
+// GET /inicio — depois do login Microsoft 365: primeira página que o perfil pode abrir
+app.MapGet("/inicio", async (HttpContext http) =>
+    http.User.Identity?.IsAuthenticated == true
+        ? Results.Redirect(await SessaoPortal.PaginaInicialAsync(http.RequestServices, http.User))
+        : Results.Redirect("/login"));
+
+// POST /api/auth/recuperar-senha — "Esqueci minha senha": senha temporária por e-mail.
+// A resposta é sempre a mesma, exista ou não a conta.
+app.MapPost("/api/auth/recuperar-senha", async (
+        HttpContext http,
+        IRecuperacaoSenhaService recuperacao,
+        [FromForm] string loginOuEmail) =>
+    {
+        var portal = $"{http.Request.Scheme}://{http.Request.Host}{http.Request.PathBase}";
+        await recuperacao.SolicitarAsync(loginOuEmail, http.Connection.RemoteIpAddress?.ToString(), portal);
+        return Results.Redirect("/recuperar-senha?enviado=1");
     })
     .DisableAntiforgery()
     .RequireRateLimiting("login");
@@ -270,17 +330,24 @@ app.MapPost("/api/usuarios/criar", async (
         [FromForm] string username,
         [FromForm] string displayName,
         [FromForm] int perfilId,
-        [FromForm] string senhaInicial,
+        [FromForm] string? senhaInicial,
+        [FromForm] string? email,
+        [FromForm] string? tipoAutenticacao,
+        [FromForm] string? senhaExpira,
         [FromForm] string? exigirTroca) =>
     {
-        var resultado = await userService.CriarAsync(username, displayName, perfilId, senhaInicial,
-            exigirTroca: exigirTroca == "true");
+        var dados = new DadosUsuario(displayName, perfilId, email,
+            tipoAutenticacao == "Microsoft365" ? TipoAutenticacao.Microsoft365 : TipoAutenticacao.Local,
+            SenhaExpira: senhaExpira == "true", ExigirTroca: exigirTroca == "true");
+        var resultado = await userService.CriarAsync(username, senhaInicial, dados);
 
         return resultado switch
         {
             UserOperationResult.Sucesso          => Results.Redirect("/usuarios?sucesso=criado"),
             UserOperationResult.UsuarioJaExiste  => Results.Redirect("/usuarios?erro=usuario-existe"),
             UserOperationResult.SenhaInvalida    => Results.Redirect("/usuarios?erro=senha-fraca"),
+            UserOperationResult.EmailJaExiste    => Results.Redirect("/usuarios?erro=email-existe"),
+            UserOperationResult.EmailObrigatorio => Results.Redirect("/usuarios?erro=email-m365"),
             _                                    => Results.Redirect("/usuarios?erro=dados-invalidos"),
         };
     })
@@ -339,7 +406,8 @@ static async Task<List<AuditoriaAcao>> PesquisarAuditoriaAsync(IAuditoriaService
         Operador = q["operador"], Servidor = q["servidor"], Alvo = q["alvo"],
         Limite   = 10_000,
     });
-    return itens;
+    // Mesma ordem escolhida na tela (clique no cabeçalho das colunas)
+    return Ordenacao.DaUrl(q["ordenar"], "data").Aplicar(itens, AuditoriaOrdenacao.Acoes).ToList();
 }
 
 // GET /api/auditoria/csv
@@ -407,7 +475,7 @@ app.MapGet("/api/relatorios/eventos.xlsx", async (IRelatorioService relatorios, 
         var linhasEventos = relatorios.Eventos(itens,
             Horario.ParaUtc(DataLocal(req.Query["de"])), Horario.ParaUtc(DataLocal(req.Query["ate"])),
             incluirSecundarios: req.Query["secundarios"] == "1");
-        if (req.Query["ordem"] == "recentes") linhasEventos.Reverse();
+        linhasEventos = Ordenacao.DaUrl(req.Query["ordenar"], "data").Aplicar(linhasEventos, RelatorioOrdenacao.Colunas).ToList();
 
         var colunas = new XlsxColuna[]
         {
@@ -477,6 +545,18 @@ agentApi.MapPost("/heartbeat", async (
         };
     });
 
+// POST /api/agent/offline/{serverName}
+// O agente avisa que está sendo encerrado (serviço parado, desinstalação,
+// atualização): o servidor aparece offline na hora, sem esperar o tempo limite.
+agentApi.MapPost("/offline/{serverName}", async (string serverName, AppDbContext db, ILogger<Program> log) =>
+    {
+        var nome = serverName.ToLower();
+        var afetados = await db.Servers.Where(s => s.Name.ToLower() == nome && s.IsOnline)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.IsOnline, false));
+        if (afetados > 0) log.LogInformation("Agente de {Server} avisou o encerramento: servidor offline.", serverName);
+        return Results.Ok();
+    });
+
 // GET /api/agent/pacote/{versao}
 // O agente baixa o pacote da versão nova (atualização automática).
 agentApi.MapGet("/pacote/{versao}", async (string versao, IAtualizacaoAgenteService atualizacao) =>
@@ -535,18 +615,25 @@ app.MapPost("/api/usuarios/editar", async (
         [FromForm] string displayName,
         [FromForm] int perfilId,
         [FromForm] string? novaSenha,
+        [FromForm] string? email,
+        [FromForm] string? tipoAutenticacao,
+        [FromForm] string? senhaExpira,
         [FromForm] string? exigirTroca) =>
     {
-        var resultado = await userService.EditarAsync(id, displayName, perfilId, novaSenha,
-            exigirTroca: exigirTroca == "true");
+        var dados = new DadosUsuario(displayName, perfilId, email,
+            tipoAutenticacao == "Microsoft365" ? TipoAutenticacao.Microsoft365 : TipoAutenticacao.Local,
+            SenhaExpira: senhaExpira == "true", ExigirTroca: exigirTroca == "true");
+        var resultado = await userService.EditarAsync(id, novaSenha, dados);
 
         return resultado switch
         {
-            UserOperationResult.Sucesso       => Results.Redirect("/usuarios?sucesso=editado"),
-            UserOperationResult.SenhaInvalida => Results.Redirect($"/usuarios/editar/{id}?erro=senha-fraca"),
-            UserOperationResult.NaoEncontrado => Results.Redirect("/usuarios?erro=nao-encontrado"),
+            UserOperationResult.Sucesso             => Results.Redirect("/usuarios?sucesso=editado"),
+            UserOperationResult.SenhaInvalida       => Results.Redirect($"/usuarios/editar/{id}?erro=senha-fraca"),
+            UserOperationResult.NaoEncontrado       => Results.Redirect("/usuarios?erro=nao-encontrado"),
             UserOperationResult.UltimoAdministrador => Results.Redirect($"/usuarios/editar/{id}?erro=ultimo-admin"),
-            _                                 => Results.Redirect($"/usuarios/editar/{id}?erro=dados-invalidos"),
+            UserOperationResult.EmailJaExiste       => Results.Redirect($"/usuarios/editar/{id}?erro=email-existe"),
+            UserOperationResult.EmailObrigatorio    => Results.Redirect($"/usuarios/editar/{id}?erro=email-m365"),
+            _                                       => Results.Redirect($"/usuarios/editar/{id}?erro=dados-invalidos"),
         };
     })
     .DisableAntiforgery()

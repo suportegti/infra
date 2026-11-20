@@ -85,9 +85,6 @@
     <label class="toolbar-check" title="Eventos 1149 (autenticação RDP) e 22 (área de trabalho carregada)">
         <input type="checkbox" @bind="incluirSecundarios" @bind:after="MontarLinhas" /> Mostrar autenticação e área de trabalho
     </label>
-    <label class="toolbar-check">
-        <input type="checkbox" @bind="maisRecentes" @bind:after="MontarLinhas" /> Mais recentes primeiro
-    </label>
 </div>
 
 <p class="search-summary" role="status">
@@ -108,14 +105,14 @@
     <table class="data-table relatorio-eventos">
         <thead>
             <tr>
-                <th>Data/hora</th>
-                <th>Servidor</th>
-                <th>Usuário</th>
-                <th>Sessão</th>
-                <th>Origem</th>
-                <th>Duração</th>
-                <th>Status</th>
-                <th>Detalhe</th>
+                <ThOrdenavel Titulo="Data/hora" Campo="data"     Ordem="ordem" ComecaDecrescente OnAlterada="MontarLinhas" />
+                <ThOrdenavel Titulo="Servidor"  Campo="servidor" Ordem="ordem" OnAlterada="MontarLinhas" />
+                <ThOrdenavel Titulo="Usuário"   Campo="usuario"  Ordem="ordem" OnAlterada="MontarLinhas" />
+                <ThOrdenavel Titulo="Sessão"    Campo="sessao"   Ordem="ordem" OnAlterada="MontarLinhas" />
+                <ThOrdenavel Titulo="Origem"    Campo="origem"   Ordem="ordem" OnAlterada="MontarLinhas" />
+                <ThOrdenavel Titulo="Duração"   Campo="duracao"  Ordem="ordem" ComecaDecrescente OnAlterada="MontarLinhas" />
+                <ThOrdenavel Titulo="Status"    Campo="status"   Ordem="ordem" OnAlterada="MontarLinhas" />
+                <ThOrdenavel Titulo="Detalhe"   Campo="detalhe"  Ordem="ordem" OnAlterada="MontarLinhas" />
             </tr>
         </thead>
         <tbody>
@@ -157,7 +154,7 @@ else if (!carregando)
 }
 
 @code {
-    private readonly PeriodoFiltro   periodo = new("7d");
+    private readonly PeriodoFiltro   periodo = new("1h");
     private readonly FiltroRelatorio filtro  = new();
 
     private List<SessionHistory> itens = new();
@@ -168,7 +165,7 @@ else if (!carregando)
     private List<string> clientes   = new();
     private List<LinhaEvento> linhas = new();
     private bool incluirSecundarios;
-    private bool maisRecentes;
+    private readonly Ordenacao ordem = new("data", desc: true);
     private const int LimiteTela = 2000;
 
     protected override async Task OnInitializedAsync()
@@ -195,7 +192,7 @@ else if (!carregando)
     private async Task LimparAsync()
     {
         filtro.Servidor = filtro.Cliente = filtro.Usuario = filtro.Situacao = null;
-        periodo.Aplicar("7d");
+        periodo.Aplicar("1h");
         await PesquisarAsync();
     }
 
@@ -207,7 +204,7 @@ else if (!carregando)
     private void MontarLinhas()
     {
         linhas = RelatorioService.Eventos(itens, Horario.ParaUtc(periodo.DeLocal), Horario.ParaUtc(periodo.AteLocal), incluirSecundarios);
-        if (maisRecentes) linhas.Reverse();
+        linhas = ordem.Aplicar(linhas, RelatorioOrdenacao.Colunas).ToList();
     }
 
     private static string CorEvento(SessionEventType t) => t switch
@@ -229,7 +226,7 @@ else if (!carregando)
         Add("usuario",  filtro.Usuario);
         Add("situacao", filtro.Situacao);
         if (incluirSecundarios) Add("secundarios", "1");
-        if (maisRecentes)       Add("ordem", "recentes");
+        Add("ordenar", ordem.ParaUrl());
         return $"/api/relatorios/{arquivo}" + (q.Count > 0 ? "?" + string.Join("&", q) : "");
     }
 

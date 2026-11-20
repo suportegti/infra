@@ -314,6 +314,47 @@ Portal e agente de versões diferentes funcionam juntos: um agente mais antigo
 só deixa de enviar os dados que surgiram depois (origem, eventos do Windows,
 versão). Atualize os agentes para ter tudo.
 
+## 7.1 Configurações do sistema (1.8.0)
+
+> Guia detalhado do login com Microsoft 365, da recuperação de senha por e-mail e
+> da expiração de senha: [`AUTENTICACAO.md`](AUTENTICACAO.md).
+
+Em **Administração > Configurações** (permissão *Configurações do sistema*):
+
+- **Política de senha**: validade, em dias, das senhas locais dos usuários com
+  *"Senha expira"* marcado no cadastro. Vencida, a pessoa cria outra no próximo login.
+- **Envio de e-mail**, usado no *"Esqueci minha senha"*: servidor **SMTP** (porta 587
+  com TLS; a 465 não é suportada) ou **Microsoft 365** pelo Microsoft Graph (o
+  aplicativo abaixo precisa da permissão de aplicativo `Mail.Send`). Use **Enviar
+  e-mail de teste** antes de liberar para os usuários.
+- **Microsoft 365**: Tenant, ID do aplicativo e a **chave** (segredo do cliente),
+  com a data de vencimento. A tela traz o passo a passo do registro no Entra ID e
+  a URI de retorno a cadastrar (`https://<portal>/signin-oidc`). **Testar conexão**
+  confere Tenant, aplicativo e chave. A chave fica gravada criptografada e nunca é
+  exibida; para **trocá-la** (rotina de segurança), gere um segredo novo no Entra
+  ID, cole na tela com a nova data e salve — vale na hora. Faltando 30 dias para
+  vencer, a tela de Configurações e o Dashboard avisam os administradores.
+
+> O **login com Microsoft 365 exige o portal em HTTPS** (a Microsoft só devolve o
+> login para endereços https, exceto localhost). Configure um certificado no
+> portal (ex.: atrás do IIS/proxy reverso ou `Kestrel:Endpoints` com certificado)
+> antes de habilitar o botão.
+
+Cada usuário é **Local** (usuário e senha do portal) ou **Microsoft 365** (entra pelo
+botão *Entrar com Microsoft 365* com a conta da empresa cujo e-mail está no
+cadastro). Contas Microsoft 365 não têm senha no portal; troca, expiração e
+recuperação seguem o Microsoft 365.
+
+**"Esqueci minha senha"** (tela de login) envia uma senha temporária ao e-mail do
+cadastro, válida por 30 minutos. A senha atual continua valendo até a pessoa criar
+a nova; ao entrar com a temporária, a troca é obrigatória. A resposta da tela é a
+mesma exista ou não a conta.
+
+> As chaves de criptografia do portal (login e segredos das Configurações) ficam em
+> `data\chaves`, protegidas pelo Windows da própria máquina. Inclua `data\` no
+> backup. Na primeira subida da 1.8.0 os usuários precisam entrar de novo (os
+> cookies antigos deixam de valer).
+
 ## 8. Desinstalar
 
 ```powershell
@@ -386,7 +427,11 @@ repositório. Os parâmetros (5 tentativas, 15 min, 10/min) estão em
 | *Chave da API foi RECUSADA (401)* | A chave difere do `AgentSettings:ApiKey` em `appsettings.Production.json` do portal |
 | *404 em /api/agent/ping* | O endereço não é o portal, ou o portal é de uma versão anterior |
 | Servidor não fica online | Nome não cadastrado ou diferente, ou servidor desabilitado. Veja o log: `Get-EventLog Application -Source RDSMonitor.Agent -Newest 20` |
-| Servidor fica *offline* depois de um tempo | O agente parou de enviar heartbeat por 2 min. Veja o status do serviço e o log |
+| Servidor fica *offline* | Sem contato do agente por 20 s (o agente busca comandos a cada 3 s). Parar ou desinstalar o serviço deixa offline na hora. Veja o status do serviço e o log local do agente |
+| *Reiniciar serviço* do TermService falha | Em servidores com a função **Host de Sessão da Área de Trabalho Remota** o Windows não permite parar o TermService com o servidor em funcionamento; o agente avisa isso na tela. Use **Reiniciar servidor**. Outros erros mostram o código do Windows e o detalhe completo fica no log local do agente |
+| Login com Microsoft 365 não aparece | Habilite em **Configurações > Microsoft 365** (Tenant, aplicativo e chave preenchidos). O portal precisa estar em HTTPS |
+| *Não há usuário do RDSManager com esse e-mail* | O usuário precisa estar cadastrado como **Microsoft 365** com o mesmo e-mail da conta da empresa |
+| "Esqueci minha senha" não chega | Configure **Configurações > E-mail** e use **Enviar e-mail de teste**. O usuário precisa ser local, ativo e ter e-mail cadastrado. Tentativas aparecem em Auditoria > Tentativas de acesso |
 | Portal não abre | `Get-Service RDSMonitor.Web` e `Get-EventLog Application -Source RDSMonitor.Web -Newest 20` |
 | Esqueci a senha do admin | No servidor do portal: `cd C:\RDSMonitor\Web; .\RDSMonitor.Web.exe --reset-senha-admin="NovaSenha#1"` (também remove o bloqueio por tentativas) |
 | Admin bloqueado por tentativas | Outro administrador clica **Desbloquear** em Usuários do sistema; ou, no servidor: `cd C:\RDSMonitor\Web; .\RDSMonitor.Web.exe --desbloquear-admin` (não altera a senha). O bloqueio também expira sozinho em 15 min |
@@ -418,3 +463,8 @@ na tela Sessões no próximo heartbeat (até 15 s).
 Get-EventLog Application -Source RDSMonitor.Web   -Newest 20 | Format-List TimeGenerated, EntryType, Message
 Get-EventLog Application -Source RDSMonitor.Agent -Newest 20 | Format-List TimeGenerated, EntryType, Message
 ```
+
+O agente também grava um **log local** com o detalhe completo dos erros (o Visualizador
+de Eventos corta mensagens longas): `C:\RDSMonitor\Agent\logs\agente-AAAAMMDD.log`,
+guardado por 30 dias. Comandos recebidos, resultados e falhas (com o código do
+Windows) ficam lá.

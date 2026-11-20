@@ -2,6 +2,8 @@
 @rendermode InteractiveServer
 @attribute [Authorize(Policy = Permissoes.DashboardVer)]
 @inject IServerService ServerService
+@inject IConfiguracaoService Configuracao
+@inject IPermissaoService PermissaoService
 @implements IDisposable
 
 <PageTitle>Dashboard · RDSManager</PageTitle>
@@ -10,6 +12,14 @@
     <h1>Dashboard</h1>
     <p>Visão geral dos servidores RDS monitorados.</p>
 </div>
+
+@if (avisoChave is not null)
+{
+    <div class="login-alert" role="alert">
+        <i class="fa-solid fa-triangle-exclamation"></i> @avisoChave
+        <a href="configuracoes">Trocar a chave</a>
+    </div>
+}
 
 <section class="summary-grid">
     <div class="summary-card">
@@ -105,8 +115,23 @@
     private List<Server> servidores = new();
     private System.Timers.Timer? _timer;
 
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthState { get; set; } = null!;
+
+    private string? avisoChave;
+
     protected override async Task OnInitializedAsync()
     {
+        // Aviso para quem administra: chave do aplicativo Microsoft 365 vencendo
+        if (await PermissaoService.PossuiAsync((await AuthState).User, Permissoes.ConfiguracoesGerenciar))
+        {
+            var m = await Configuracao.M365Async();
+            if (m.Configurado && m.DiasParaExpirar is { } dias && dias <= 30)
+                avisoChave = dias < 0
+                    ? $"A chave do aplicativo Microsoft 365 venceu em {m.SegredoExpiraEm:dd/MM/yyyy}."
+                    : $"A chave do aplicativo Microsoft 365 vence em {dias} dia(s) ({m.SegredoExpiraEm:dd/MM/yyyy}).";
+        }
+
         await CarregarAsync();
 
         _timer = new System.Timers.Timer(30_000);

@@ -17,6 +17,7 @@ public class AppDbContext : DbContext
     public DbSet<SessionHistory> SessionHistories => Set<SessionHistory>();
     public DbSet<SessionEvent>   SessionEvents   => Set<SessionEvent>();
     public DbSet<AgentePacote>   AgentePacotes   => Set<AgentePacote>();
+    public DbSet<Configuracao>   Configuracoes   => Set<Configuracao>();
     public DbSet<Command>        Commands        => Set<Command>();
     public DbSet<ServerProcess>  Processes       => Set<ServerProcess>();
 
@@ -33,6 +34,8 @@ public class AppDbContext : DbContext
             e.HasIndex(u => u.Username).IsUnique();
             e.Property(u => u.Username).IsRequired().HasMaxLength(100);
             e.Property(u => u.DisplayName).IsRequired().HasMaxLength(150);
+            e.Property(u => u.Email).HasMaxLength(200);
+            e.HasIndex(u => u.Email);
             e.HasOne(u => u.Perfil)
              .WithMany(p => p.Usuarios)
              .HasForeignKey(u => u.PerfilId)
@@ -87,6 +90,15 @@ public class AppDbContext : DbContext
             e.Property(s => s.VersaoAlvo).HasMaxLength(30);
             e.Property(s => s.AtualizacaoStatus).HasMaxLength(40);
             e.Property(s => s.AtualizacaoMensagem).HasMaxLength(500);
+        });
+
+        // ── Configuracao ─────────────────────────────────────
+        modelBuilder.Entity<Configuracao>(e =>
+        {
+            e.ToTable("Configuracoes");
+            e.HasKey(c => c.Chave);
+            e.Property(c => c.Chave).HasMaxLength(80);
+            e.Property(c => c.AlteradoPor).HasMaxLength(100);
         });
 
         // ── AgentePacote ─────────────────────────────────────

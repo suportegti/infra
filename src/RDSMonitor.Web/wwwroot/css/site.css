@@ -1615,3 +1615,54 @@ mark.hl {
 .upload-pacote { position: relative; overflow: hidden; cursor: pointer; }
 .upload-pacote input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 .upload-pacote.disabled { opacity: .7; pointer-events: none; }
+
+/* ── Cabeçalho ordenável (setas crescente/decrescente) ───── */
+.th-ordenavel { padding: 0 !important; }
+.th-ordenavel > button {
+    all: unset;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    width: 100%;
+    padding: 0.7rem 0.9rem;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+    text-transform: inherit;
+    letter-spacing: inherit;
+    white-space: nowrap;
+}
+.th-ordenavel > button i { opacity: 0.35; font-size: 0.75rem; }
+.th-ordenavel > button:hover i { opacity: 0.8; }
+.th-ordenavel.ativa > button { color: var(--accent); }
+.th-ordenavel.ativa > button i { opacity: 1; }
+.th-ordenavel > button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* Login: separador e botão Microsoft 365 */
+.login-separador { display: flex; align-items: center; gap: .75rem; margin: 1.1rem 0; color: var(--text-muted); font-size: .8rem; }
+.login-separador::before, .login-separador::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
+.btn-microsoft {
+    display: flex; align-items: center; justify-content: center; gap: .6rem;
+    width: 100%; padding: .7rem 1rem; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text);
+    font-weight: 600; text-decoration: none;
+}
+.btn-microsoft:hover { border-color: var(--accent); color: var(--text); }
+
+/* Cadastro de usuário: Local x Microsoft 365 */
+.form-usuario[data-tipo="Microsoft365"] .so-local { display: none; }
+.form-usuario[data-tipo="Local"] .so-m365 { display: none; }
+.form-checks { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; margin-top: .75rem; }
+
+/* Configurações */
+.config-secao { margin-bottom: 1.25rem; }
+.config-secao .relatorio-titulo { display: flex; align-items: center; gap: .5rem; margin-top: 0; }
+.config-ajuda { margin: .25rem 0 1rem; font-size: .85rem; color: var(--text-muted); }
+.config-ajuda summary { cursor: pointer; color: var(--accent); }
+.config-ajuda ol { margin: .5rem 0 0 1.1rem; display: grid; gap: .35rem; }
+.config-uri { user-select: all; }
+.config-teste {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 999px;
+    padding: .35rem .8rem; color: var(--text); min-width: 220px;
+}

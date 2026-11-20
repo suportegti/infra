@@ -81,3 +81,12 @@ document.addEventListener('click', function (event) {
     // Segurança: nunca envia o formulário com a senha visível
     document.addEventListener('submit', esconder, true);
 })();
+
+// ── Cadastro de usuário: campos de senha só para login local ────────────────
+// O formulário recebe data-tipo="Local" | "Microsoft365" e o CSS esconde .so-local / .so-m365.
+document.addEventListener('change', function (e) {
+    var sel = e.target.closest && e.target.closest('select.tipo-autenticacao');
+    if (!sel) return;
+    var form = sel.closest('form');
+    if (form) form.setAttribute('data-tipo', sel.value);
+});

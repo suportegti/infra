@@ -79,17 +79,17 @@
     <table class="data-table audit-table">
         <thead>
             <tr>
-                <th>Data/hora</th>
-                <th>Operador</th>
-                <th>Ação</th>
-                <th>Servidor</th>
-                <th>Alvo</th>
-                <th>Detalhes</th>
-                <th>Resultado</th>
+                <ThOrdenavel Titulo="Data/hora" Campo="data"      Ordem="ordem" ComecaDecrescente />
+                <ThOrdenavel Titulo="Operador"  Campo="operador"  Ordem="ordem" />
+                <ThOrdenavel Titulo="Ação"      Campo="acao"      Ordem="ordem" />
+                <ThOrdenavel Titulo="Servidor"  Campo="servidor"  Ordem="ordem" />
+                <ThOrdenavel Titulo="Alvo"      Campo="alvo"      Ordem="ordem" />
+                <ThOrdenavel Titulo="Detalhes"  Campo="detalhes"  Ordem="ordem" />
+                <ThOrdenavel Titulo="Resultado" Campo="resultado" Ordem="ordem" />
             </tr>
         </thead>
         <tbody>
-            @foreach (var a in itens)
+            @foreach (var a in ordem.Aplicar(itens, AuditoriaOrdenacao.Acoes))
             {
                 <tr>
                     <td class="mono">@Horario.Fmt(a.DataHora, "dd/MM/yyyy HH:mm:ss")</td>
@@ -145,10 +145,16 @@ else if (!carregando)
         {
             <table class="data-table audit-table">
                 <thead>
-                    <tr><th>Data/hora</th><th>Usuário</th><th>Origem (IP)</th><th>Resultado</th><th>Detalhe</th></tr>
+                    <tr>
+                        <ThOrdenavel Titulo="Data/hora"   Campo="data"      Ordem="ordemAcessos" ComecaDecrescente />
+                        <ThOrdenavel Titulo="Usuário"     Campo="usuario"   Ordem="ordemAcessos" />
+                        <ThOrdenavel Titulo="Origem (IP)" Campo="ip"        Ordem="ordemAcessos" />
+                        <ThOrdenavel Titulo="Resultado"   Campo="resultado" Ordem="ordemAcessos" />
+                        <ThOrdenavel Titulo="Detalhe"     Campo="detalhe"   Ordem="ordemAcessos" />
+                    </tr>
                 </thead>
                 <tbody>
-                    @foreach (var a in acessos)
+                    @foreach (var a in ordemAcessos.Aplicar(acessos, AuditoriaOrdenacao.Acessos))
                     {
                         <tr>
                             <td class="mono">@Horario.Fmt(a.DataHora, "dd/MM/yyyy HH:mm:ss")</td>
@@ -173,7 +179,9 @@ else if (!carregando)
 
 @code {
     private readonly FiltroAuditoria filtro = new();
-    private readonly PeriodoFiltro periodo = new("7d");
+    private readonly PeriodoFiltro periodo = new("1h");
+    private readonly Ordenacao ordem        = new("data", desc: true);
+    private readonly Ordenacao ordemAcessos = new("data", desc: true);
     private string  acaoTexto   = string.Empty;
     private string  statusTexto = string.Empty;
 
@@ -221,7 +229,7 @@ else if (!carregando)
     {
         filtro.Operador = filtro.Servidor = filtro.Alvo = null;
         acaoTexto = statusTexto = string.Empty;
-        periodo.Aplicar("7d");
+        periodo.Aplicar("1h");
         await PesquisarAsync();
     }
 
@@ -242,6 +250,7 @@ else if (!carregando)
             Add("operador", filtro.Operador);
             Add("servidor", filtro.Servidor);
             Add("alvo",     filtro.Alvo);
+            Add("ordenar",  ordem.ParaUrl());
             return $"/api/auditoria/{formato}" + (q.Count > 0 ? "?" + string.Join("&", q) : "");
         }
     }

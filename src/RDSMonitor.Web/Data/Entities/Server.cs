@@ -23,6 +23,12 @@ public class Server
 
     public DateTime? LastHeartbeat { get; set; }
 
+    /// <summary>
+    /// Último contato do agente (heartbeat a cada 30 s ou busca de comandos a cada 3 s).
+    /// Sem contato por 20 s o servidor fica offline (ServerHealthMonitor).
+    /// </summary>
+    public DateTime? UltimoContato { get; set; }
+
     public double CpuPercent { get; set; }
     public double MemoryUsedGb { get; set; }
     public double MemoryTotalGb { get; set; }

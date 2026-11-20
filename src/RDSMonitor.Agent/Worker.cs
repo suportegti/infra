@@ -59,6 +59,13 @@ public class Worker : BackgroundService
             CommandPollLoopAsync(ct));
     }
 
+    /// <summary>Serviço parando (stop, desinstalação, atualização): avisa o portal antes de sair.</summary>
+    public override async Task StopAsync(CancellationToken ct)
+    {
+        await _api.AvisarEncerramentoAsync();
+        await base.StopAsync(ct);
+    }
+
     // ── Loop de Heartbeat ─────────────────────────────────────────────────────
 
     private async Task HeartbeatLoopAsync(CancellationToken ct)

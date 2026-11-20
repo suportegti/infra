@@ -3,6 +3,7 @@
 @inject IUserService UserService
 @inject IPerfilService PerfilService
 @inject PresencaService Presenca
+@inject IConfiguracaoService Configuracao
 
 <PageTitle>Usuários do Sistema · RDSManager</PageTitle>
 
@@ -43,6 +44,14 @@ else if (Erro == "nao-encontrado")
 {
     <div class="login-alert" role="alert">Usuário não encontrado.</div>
 }
+else if (Erro == "email-existe")
+{
+    <div class="login-alert" role="alert">Outro usuário já usa esse e-mail.</div>
+}
+else if (Erro == "email-m365")
+{
+    <div class="login-alert" role="alert">Contas Microsoft 365 precisam de um e-mail válido (é o login da pessoa na Microsoft).</div>
+}
 else if (Erro == "ultimo-admin")
 {
     <div class="login-alert" role="alert">Não é possível desabilitar o último administrador ativo do sistema.</div>
@@ -53,7 +62,7 @@ else if (Erro == "ultimo-admin")
         <span><i class="fa-solid fa-user-plus"></i> Novo usuário</span>
         <i class="fa-solid fa-chevron-down chevron"></i>
     </summary>
-    <form method="post" action="/api/usuarios/criar">
+    <form method="post" action="/api/usuarios/criar" class="form-usuario" data-tipo="Local">
         <div class="form-grid">
             <label class="field">
                 <i class="fa-solid fa-user"></i>
@@ -72,16 +81,37 @@ else if (Erro == "ultimo-admin")
                     }
                 </select>
             </label>
-            <label class="field field-senha">
+            <label class="field">
+                <i class="fa-solid fa-envelope"></i>
+                <input name="email" type="email" maxlength="200" placeholder="E-mail (recuperação de senha / login Microsoft 365)" />
+            </label>
+            <label class="field">
+                <i class="fa-solid fa-right-to-bracket"></i>
+                <select name="tipoAutenticacao" class="tipo-autenticacao" aria-label="Como o usuário entra">
+                    <option value="Local">Login local (usuário e senha do portal)</option>
+                    <option value="Microsoft365">Microsoft 365 (conta da empresa, pelo e-mail)</option>
+                </select>
+            </label>
+            <label class="field field-senha so-local">
                 <i class="fa-solid fa-key"></i>
-                <input name="senhaInicial" type="password" placeholder="Senha inicial (mín. 8 caracteres)" minlength="8" required />
+                <input name="senhaInicial" type="password" placeholder="Senha inicial (mín. 8 caracteres)" minlength="8" />
                 <button type="button" class="olho-senha" tabindex="-1" aria-label="Mostrar senha (mantenha pressionado)" title="Mantenha pressionado para ver a senha"><i class="fa-solid fa-eye"></i></button>
             </label>
         </div>
-            <label class="toolbar-check" style="margin-top:.75rem;">
+        <div class="so-local form-checks">
+            <label class="toolbar-check">
                 <input type="checkbox" name="exigirTroca" value="true" checked />
                 Exigir troca de senha no primeiro login
             </label>
+            <label class="toolbar-check">
+                <input type="checkbox" name="senhaExpira" value="true" />
+                Senha expira a cada @validadeDias dias
+            </label>
+        </div>
+        <p class="so-m365 dash-note" style="margin:.75rem 0 0;">
+            A pessoa entra pelo botão <strong>Entrar com Microsoft 365</strong> usando a conta da empresa com este e-mail.
+            Senha, troca e expiração seguem as regras do Microsoft 365.
+        </p>
         <div class="form-actions">
             <button type="submit" class="btn-pill primary"><i class="fa-solid fa-plus"></i> Criar usuário</button>
         </div>
@@ -138,6 +168,7 @@ else if (Erro == "ultimo-admin")
         <tr>
             <th>Usuário</th>
             <th>Nome</th>
+            <th>E-mail</th>
             <th>Perfil</th>
             <th>Status</th>
             <th>Último login <span class="sub-label">(Brasília)</span></th>
@@ -156,6 +187,7 @@ else if (Erro == "ultimo-admin")
                     }
                 </td>
                 <td>@usuario.DisplayName</td>
+                <td class="mono">@(usuario.Email ?? "—")</td>
                 <td><span class="badge bg-secondary">@(usuario.Perfil?.Nome ?? "Sem perfil")</span></td>
                 <td>
                     <span class="status-dot @(usuario.Ativo ? "active" : "disconnected")"></span>
@@ -164,6 +196,18 @@ else if (Erro == "ultimo-admin")
                     {
                         <span class="badge bg-warning text-dark" title="Bloqueado por tentativas de login">
                             <i class="fa-solid fa-lock"></i> Bloqueado até @Horario.Fmt(usuario.LockoutEnd!.Value, "HH:mm")
+                        </span>
+                    }
+                    @if (usuario.TipoAutenticacao == TipoAutenticacao.Microsoft365)
+                    {
+                        <span class="badge bg-primary" title="Entra com a conta Microsoft 365 do e-mail cadastrado">Microsoft 365</span>
+                    }
+                    else if (usuario.SenhaVenceEm(validadeDias) is { } vence)
+                    {
+                        var dias = (int)Math.Ceiling((vence - DateTime.UtcNow).TotalDays);
+                        <span class="badge @(dias <= 0 ? "bg-danger" : dias <= 7 ? "bg-warning text-dark" : "bg-secondary")"
+                              title="Senha vence em @Horario.Fmt(vence, "dd/MM/yyyy")">
+                            <i class="fa-solid fa-hourglass-half"></i> @(dias <= 0 ? "Senha vencida" : $"Senha vence em {dias} dia(s)")
                         </span>
                     }
                     @if (usuario.TrocarSenhaNoProximoLogin)
@@ -219,6 +263,7 @@ else if (Erro == "ultimo-admin")
 
     private List<AppUser> ListaUsuarios { get; set; } = new();
     private List<UsuarioOnline> Online { get; set; } = new();
+    private int validadeDias = 90;
     private List<RDSMonitor.Web.Data.Entities.Perfil> Perfis { get; set; } = new();
 
     private static bool Bloqueado(AppUser u) => u.LockoutEnd is { } fim && fim > DateTime.UtcNow;
@@ -227,6 +272,7 @@ else if (Erro == "ultimo-admin")
     {
         ListaUsuarios = await UserService.ListarAsync();
         Online        = Presenca.Online();
+        validadeDias  = (await Configuracao.PoliticaSenhaAsync()).ValidadeDias;
         Perfis        = await PerfilService.ListarParaSelecaoAsync();
     }
 }

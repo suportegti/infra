@@ -15,9 +15,8 @@ etapas (sessões reais, servidores, relatórios, agente Windows).
 - **SQLite** como banco desta primeira versão (fácil de rodar localmente,
   sem depender de uma instância SQL Server) — a troca para **SQL Server**
   é só mudar o provider do EF Core em `Program.cs` e a connection string
-- Autenticação por **cookie**, com um usuário de demonstração por perfil.
-  A integração com **Active Directory / Microsoft Entra ID** entra como
-  próxima etapa, no ponto já sinalizado em `Services/UserService.cs`
+- Autenticação por **cookie**, com usuários **locais** ou **Microsoft 365**
+  (Microsoft Entra ID, via OpenID Connect) — ver `docs/AUTENTICACAO.md`
 
 ## Estrutura do projeto
 
@@ -64,7 +63,7 @@ Para instalar o portal e os agentes em Windows Server, veja
 [docs/IMPLANTACAO.md](docs/IMPLANTACAO.md). Em resumo:
 
 ```powershell
-.\deploy\build-pacotes.ps1 -Versao 1.7.0     # gera dist\RDSMonitor.Web-*.zip e dist\RDSMonitor.Agent-*.zip
+.\deploy\build-pacotes.ps1 -Versao 1.8.0     # gera dist\RDSMonitor.Web-*.zip e dist\RDSMonitor.Agent-*.zip
 # no servidor do portal:      .\install-web.ps1 -SenhaAdmin "..."
 # em cada servidor RDS:       .\install-agent.ps1 -ServidorWeb <ip-ou-dns> -ApiKey "..."
 ```
@@ -122,9 +121,8 @@ senha.
   dados reais).
 - **Alterar senha**: tela `/alterar-senha`, acessível pelo link na tela de
   login e pelo menu do usuário (já logado). Pede usuário + senha atual +
-  nova senha (troca autosserviço — ainda não há recuperação por e-mail, pois
-  isso depende da integração com AD/Entra ID prevista para uma próxima
-  etapa).
+  nova senha (troca autosserviço). Desde a 1.8.0 há também recuperação por
+  e-mail com senha temporária — ver `docs/AUTENTICACAO.md`.
 
 ## Administração de usuários (novo)
 
@@ -258,6 +256,36 @@ restaura a anterior sozinho. Tudo vai para a Auditoria. Agentes anteriores à
 1.7.0 precisam ser atualizados uma última vez pelo instalador. Ver
 `docs/IMPLANTACAO.md`, seção 7.
 
+## Usuários: e-mail, expiração de senha e Microsoft 365 (1.8.0)
+
+Implementado nesta versão:
+
+- **Integração de login com o Microsoft 365** (Entra ID): botão *Entrar com
+  Microsoft 365*, usuário identificado pelo e-mail do cadastro, configurador de
+  Tenant, aplicativo e chave com rotação e aviso de vencimento.
+- **Recuperação de senha por e-mail**: *Esqueci minha senha* envia uma senha
+  temporária (30 min) por SMTP ou Microsoft 365, com troca obrigatória.
+- **Expiração de senha**: validade configurável e marcação *Senha expira* por
+  usuário.
+
+Guia completo (registro no Entra ID, configuração, proteções e testes):
+**`docs/AUTENTICACAO.md`**.
+
+Cada usuário tem **e-mail** e **tipo de login**: *Local* ou *Microsoft 365* (entra
+pelo botão da Microsoft com a conta da empresa do mesmo e-mail). Contas locais
+podem ter **"Senha expira"** (validade em Configurações) e usam o **"Esqueci minha
+senha"**, que envia uma senha temporária por e-mail (30 min). Tenant, aplicativo,
+chave do Microsoft 365 e o envio de e-mail (SMTP ou Microsoft 365) ficam em
+**Administração > Configurações**; segredos são gravados criptografados e a chave
+do aplicativo tem data de vencimento com aviso. O login com Microsoft 365 exige o
+portal em HTTPS. Ver `docs/IMPLANTACAO.md`, seção 7.1.
+
+## Tabelas ordenáveis e período padrão
+
+Em Sessões, Relatórios e Auditoria, clique no título da coluna para ordenar
+(setas: crescente/decrescente). Por padrão, data/hora mais recente primeiro; as
+exportações seguem a ordem da tela. Relatórios e Auditoria abrem em **Última hora**.
+
 ## Usuários conectados e histórico de acessos
 
 **Usuários do sistema** mostra quem está conectado ao portal agora (tela aberta
@@ -288,7 +316,7 @@ mesmo para o Administrador ainda não disparam nenhuma ação real.
 4. Implementar os relatórios (licenças em uso, usuários simultâneos, horas
    trabalhadas, tempo médio de conexão, aplicações mais utilizadas) a
    partir do `SessionHistory`.
-5. Substituir a autenticação local por Active Directory / Microsoft Entra
-   ID.
+5. ~~Autenticação com Microsoft Entra ID~~ — feito na 1.8.0 (login com
+   Microsoft 365). Falta, se necessário, Active Directory local (LDAP).
 6. Avaliar a migração de SQLite para SQL Server quando o volume de dados
    justificar.

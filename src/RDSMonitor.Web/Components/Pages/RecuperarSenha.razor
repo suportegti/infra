@@ -1,0 +1,53 @@
+@page "/recuperar-senha"
+
+<PageTitle>Recuperar senha · RDSManager</PageTitle>
+
+<div class="login-screen">
+    <button type="button" class="theme-toggle login-theme-toggle" onclick="toggleTheme()" title="Alternar tema claro/escuro" aria-label="Alternar tema">
+        <i class="fa-solid fa-sun theme-icon-light"></i>
+        <i class="fa-solid fa-moon theme-icon-dark"></i>
+    </button>
+
+    <div class="login-card">
+        <div class="login-mark">
+            <i class="fa-solid fa-envelope"></i>
+        </div>
+
+        <h1>Recuperar senha</h1>
+        <p class="login-subtitle">Enviaremos uma senha temporária para o e-mail cadastrado na sua conta.</p>
+
+        @if (Enviado == "1")
+        {
+            <div class="login-alert login-alert-success" role="status">
+                Se houver uma conta com esse usuário ou e-mail, uma senha temporária foi enviada.
+                Ela vale por 30 minutos; ao entrar com ela, você vai criar uma senha nova.
+                Sua senha atual continua valendo até lá.
+            </div>
+            <p class="login-hint"><a href="login">← Voltar para o login</a></p>
+        }
+        else
+        {
+            <form method="post" action="/api/auth/recuperar-senha">
+                <label class="field" for="loginOuEmail">
+                    <i class="fa-solid fa-user"></i>
+                    <input id="loginOuEmail" name="loginOuEmail" type="text" placeholder="Usuário ou e-mail" autocomplete="username" required autofocus />
+                </label>
+                <button type="submit" class="btn-entrar">ENVIAR SENHA TEMPORÁRIA</button>
+            </form>
+            <p class="login-hint">
+                Contas que entram com o Microsoft 365 recuperam a senha pela própria Microsoft.<br />
+                <a href="login">← Voltar para o login</a>
+            </p>
+        }
+    </div>
+
+    <div class="login-footer">
+        <i class="fa-solid fa-server"></i>
+        <span>Powered by <strong>RDSManager</strong></span>
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "enviado")]
+    private string? Enviado { get; set; }
+}

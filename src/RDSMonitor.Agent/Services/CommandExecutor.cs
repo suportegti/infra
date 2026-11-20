@@ -46,8 +46,8 @@ public class CommandExecutor
         }
         catch (Exception ex)
         {
-            _log.LogError(ex, "Exceção ao executar comando {Type}.", command.Type);
-            return new CommandResult { Success = false, Error = ex.Message };
+            _log.LogError(ex, "Exceção ao executar comando {Type} (Id:{Id}).", command.Type, command.Id);
+            return new CommandResult { Success = false, Error = $"{ex.Message} (detalhes no log local do agente: logs\\agente-{DateTime.Now:yyyyMMdd}.log)" };
         }
     }
 
@@ -229,6 +229,19 @@ public class CommandExecutor
         catch (InvalidOperationException) { return Erro($"O serviço \"{nome}\" não existe neste servidor."); }
 
         var limite = TimeSpan.FromSeconds(90);
+        var diagnostico = $"status={servico.Status}, aceita parar={(servico.CanStop ? "sim" : "não")}, tipo={servico.ServiceType}";
+        _log.LogInformation("Reiniciar {Servico}: {Diagnostico}", nome, diagnostico);
+
+        // Em servidores com a função Host de Sessão da Área de Trabalho Remota o Windows
+        // não deixa parar o TermService (o serviço informa que não aceita STOP).
+        if (servico.Status == System.ServiceProcess.ServiceControllerStatus.Running && !servico.CanStop)
+        {
+            _log.LogWarning("O serviço {Servico} não aceita o comando de parar ({Diagnostico}).", nome, diagnostico);
+            return Erro($"O Windows não permite parar o serviço \"{nome}\" neste servidor (o serviço não aceita o comando STOP). " +
+                        (nome.Equals("TermService", StringComparison.OrdinalIgnoreCase)
+                            ? "Isso é normal em servidores com a função Host de Sessão da Área de Trabalho Remota: o TermService não pode ser reiniciado com o servidor em funcionamento. Use \"Reiniciar servidor\"."
+                            : "Use \"Reiniciar servidor\"."));
+        }
 
         // Dependentes em execução (recursivo), na ordem pai → filho
         var dependentes = new List<string>();
@@ -290,13 +303,28 @@ public class CommandExecutor
             _log.LogInformation("Serviço {Servico} reiniciado.", nome);
             return new CommandResult { Success = true, Output = $"Serviço \"{nome}\" reiniciado.{deps}" };
         }
-        catch (System.ServiceProcess.TimeoutException)
+        catch (System.ServiceProcess.TimeoutException ex)
         {
+            servico.Refresh();
+            _log.LogError(ex, "Tempo esgotado reiniciando {Servico} ({Diagnostico}).", nome, diagnostico);
             return Erro($"O serviço \"{nome}\" não mudou de estado em {limite.TotalSeconds:0} segundos (status atual: {servico.Status}).");
         }
         catch (InvalidOperationException ex)
         {
-            return Erro($"Falha ao reiniciar \"{nome}\": {ex.InnerException?.Message ?? ex.Message}");
+            // O motivo real vem do Windows (Win32Exception) dentro da exceção
+            var win32 = ex.InnerException as System.ComponentModel.Win32Exception;
+            var motivo = win32?.NativeErrorCode switch
+            {
+                5    => "acesso negado — o agente precisa rodar como LocalSystem ou administrador",
+                1051 => "há serviços dependentes em execução que não puderam ser parados",
+                1052 or 1061 => "o serviço não aceita o comando de parar neste momento (comum no TermService de servidores de sessão RDS)",
+                1053 => "o serviço não respondeu a tempo",
+                _    => null,
+            };
+            _log.LogError(ex, "Falha ao reiniciar {Servico} ({Diagnostico}); código Windows {Codigo}.", nome, diagnostico, win32?.NativeErrorCode);
+            return Erro($"Falha ao reiniciar \"{nome}\": {win32?.Message ?? ex.Message}" +
+                        (win32 is not null ? $" (código {win32.NativeErrorCode}{(motivo is null ? "" : $": {motivo}")})" : "") +
+                        $". Detalhes no log do agente: logs\\agente-{DateTime.Now:yyyyMMdd}.log");
         }
     });
 

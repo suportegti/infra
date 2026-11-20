@@ -94,3 +94,29 @@ public class AuditoriaService : IAuditoriaService
         return (itens, truncado);
     }
 }
+
+/// <summary>Colunas ordenáveis das tabelas da Auditoria (as mesmas das exportações).</summary>
+public static class AuditoriaOrdenacao
+{
+    public static readonly IReadOnlyDictionary<string, Func<AuditoriaAcao, object?>> Acoes =
+        new Dictionary<string, Func<AuditoriaAcao, object?>>
+        {
+            ["data"]      = a => a.DataHora,
+            ["operador"]  = a => a.OperadorNome ?? a.OperadorLogin,
+            ["acao"]      = a => RDSMonitor.Web.Components.Pages.Auditoria.NomeAcao(a.Acao),
+            ["servidor"]  = a => a.ServidorNome,
+            ["alvo"]      = a => a.UsuarioAlvo ?? a.Processo,
+            ["detalhes"]  = a => a.Detalhes,
+            ["resultado"] = a => a.Status.ToString(),
+        };
+
+    public static readonly IReadOnlyDictionary<string, Func<AcessoLog, object?>> Acessos =
+        new Dictionary<string, Func<AcessoLog, object?>>
+        {
+            ["data"]      = a => a.DataHora,
+            ["usuario"]   = a => a.Usuario,
+            ["ip"]        = a => a.Ip,
+            ["resultado"] = a => AcessoLog.Descrever(a.Resultado),
+            ["detalhe"]   = a => a.Detalhe,
+        };
+}

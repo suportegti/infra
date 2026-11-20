@@ -75,6 +75,23 @@ public interface IRelatorioService
     List<LinhaEvento> Eventos(IEnumerable<SessionHistory> sessoes, DateTime? deUtc, DateTime? ateUtc, bool incluirSecundarios);
 }
 
+public static class RelatorioOrdenacao
+{
+    /// <summary>Colunas ordenáveis da tabela de Relatórios (as mesmas do Excel).</summary>
+    public static readonly IReadOnlyDictionary<string, Func<LinhaEvento, object?>> Colunas =
+        new Dictionary<string, Func<LinhaEvento, object?>>
+        {
+            ["data"]     = l => l.DataHora,
+            ["servidor"] = l => l.TextoServidor,
+            ["usuario"]  = l => l.Sessao.Username,
+            ["sessao"]   = l => l.Sessao.RdsSessionId,
+            ["origem"]   = l => l.TextoOrigem == "—" ? null : l.TextoOrigem,
+            ["duracao"]  = l => l.Duracao,
+            ["status"]   = l => l.Status,
+            ["detalhe"]  = l => l.TextoDetalhe,
+        };
+}
+
 public class RelatorioService : IRelatorioService
 {
     private readonly AppDbContext _db;

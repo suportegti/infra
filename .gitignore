@@ -15,3 +15,5 @@ simulacao.txt
 # Pacotes do agente enviados ao portal local (atualizacao automatica)
 pacotes-agente/
 _atualizacao/
+# Chaves de criptografia do portal local
+chaves/

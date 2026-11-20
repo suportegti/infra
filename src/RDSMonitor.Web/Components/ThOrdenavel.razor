@@ -1,0 +1,26 @@
+@* Cabeçalho de coluna ordenável: clique alterna crescente/decrescente (setas). *@
+<th class="th-ordenavel @(Ativa ? "ativa" : "")" aria-sort="@(Ativa ? (Ordem.Desc ? "descending" : "ascending") : "none")">
+    <button type="button" @onclick="ClicarAsync" title="Ordenar por @Titulo">
+        <span>@Titulo</span>
+        <i class="fa-solid @(Ativa ? (Ordem.Desc ? "fa-sort-down" : "fa-sort-up") : "fa-sort")" aria-hidden="true"></i>
+    </button>
+</th>
+
+@code {
+    [Parameter, EditorRequired] public string Titulo { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string Campo { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public Ordenacao Ordem { get; set; } = null!;
+
+    /// <summary>Colunas de data/hora começam pela mais recente.</summary>
+    [Parameter] public bool ComecaDecrescente { get; set; }
+
+    [Parameter] public EventCallback OnAlterada { get; set; }
+
+    private bool Ativa => Ordem.Campo == Campo;
+
+    private async Task ClicarAsync()
+    {
+        Ordem.Alternar(Campo, ComecaDecrescente);
+        await OnAlterada.InvokeAsync();
+    }
+}

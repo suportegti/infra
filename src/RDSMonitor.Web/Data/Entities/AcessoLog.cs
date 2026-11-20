@@ -17,6 +17,12 @@ public enum AcessoResultado
     TrocaDeSenhaExigida,
     /// <summary>Senha alterada pelo próprio usuário.</summary>
     SenhaAlterada,
+    /// <summary>Senha temporária enviada por e-mail ("Esqueci minha senha").</summary>
+    RecuperacaoSolicitada,
+    /// <summary>Senha correta, mas vencida: a troca é obrigatória.</summary>
+    SenhaExpirada,
+    /// <summary>Conta Microsoft 365 tentando entrar com senha local.</summary>
+    ContaMicrosoft365,
 }
 
 /// <summary>
@@ -54,6 +60,9 @@ public class AcessoLog
         AcessoResultado.Logout              => "Saiu",
         AcessoResultado.TrocaDeSenhaExigida => "Troca de senha exigida",
         AcessoResultado.SenhaAlterada       => "Senha alterada",
+        AcessoResultado.RecuperacaoSolicitada => "Senha temporária enviada",
+        AcessoResultado.SenhaExpirada       => "Senha vencida",
+        AcessoResultado.ContaMicrosoft365   => "Conta Microsoft 365 (use o botão da Microsoft)",
         _                                   => r.ToString(),
     };
 
@@ -61,7 +70,8 @@ public class AcessoLog
     public static string Css(AcessoResultado r) => r switch
     {
         AcessoResultado.Sucesso or AcessoResultado.SenhaAlterada => "active",
-        AcessoResultado.Logout or AcessoResultado.TrocaDeSenhaExigida => "idle",
+        AcessoResultado.Logout or AcessoResultado.TrocaDeSenhaExigida or AcessoResultado.SenhaExpirada
+            or AcessoResultado.RecuperacaoSolicitada or AcessoResultado.ContaMicrosoft365 => "idle",
         _ => "disconnected",
     };
 }

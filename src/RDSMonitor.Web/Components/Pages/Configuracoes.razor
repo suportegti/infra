@@ -1,0 +1,281 @@
+@page "/configuracoes"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = Permissoes.ConfiguracoesGerenciar)]
+@inject IConfiguracaoService Configuracao
+@inject IEmailService Email
+@inject IPermissaoService PermissaoService
+@inject IServiceProvider Servicos
+@inject NavigationManager Nav
+
+<PageTitle>Configurações · RDSManager</PageTitle>
+
+<div class="dash-header">
+    <h1>Configurações do sistema</h1>
+    <p>Política de senha, envio de e-mail e integração com o Microsoft 365. Segredos são gravados criptografados.</p>
+</div>
+
+@if (!string.IsNullOrEmpty(mensagem))
+{
+    <div class="login-alert @(erro ? "" : "login-alert-success")" role="alert">@mensagem</div>
+}
+
+@* ── Política de senha ─────────────────────────────────── *@
+<section class="form-panel config-secao">
+    <h2 class="relatorio-titulo"><i class="fa-solid fa-hourglass-half"></i> Política de senha</h2>
+    <p class="dash-note">Vale para os usuários locais com <strong>"Senha expira"</strong> marcado no cadastro. Quando a senha vence, a pessoa cria uma nova no próximo login.</p>
+    <div class="form-grid audit-grid">
+        <label class="field-label">
+            <span>Validade da senha (dias)</span>
+            <input type="number" min="1" max="3650" @bind="validadeDias" />
+        </label>
+    </div>
+    <div class="form-actions">
+        <button class="btn-pill primary" @onclick="SalvarSenhaAsync"><i class="fa-solid fa-check"></i> Salvar política</button>
+    </div>
+</section>
+
+@* ── E-mail ─────────────────────────────────────────────── *@
+<section class="form-panel config-secao">
+    <h2 class="relatorio-titulo"><i class="fa-solid fa-envelope"></i> Envio de e-mail</h2>
+    <p class="dash-note">Usado no <strong>"Esqueci minha senha"</strong> (envio da senha temporária).</p>
+    <div class="form-grid audit-grid">
+        <label class="field-label">
+            <span>Enviar por</span>
+            <select @bind="metodo">
+                <option value="@MetodoEmail.Desligado">Desligado</option>
+                <option value="@MetodoEmail.Smtp">Servidor SMTP</option>
+                <option value="@MetodoEmail.Microsoft365">Microsoft 365 (Graph, aplicativo abaixo)</option>
+            </select>
+        </label>
+        <label class="field-label">
+            <span>E-mail do remetente</span>
+            <input type="email" @bind="remetente" placeholder="rdsmanager@empresa.com.br" />
+        </label>
+        <label class="field-label">
+            <span>Nome do remetente</span>
+            <input @bind="nomeRemetente" placeholder="RDSManager" />
+        </label>
+    </div>
+
+    @if (metodo == MetodoEmail.Smtp)
+    {
+        <div class="form-grid audit-grid">
+            <label class="field-label">
+                <span>Servidor SMTP</span>
+                <input @bind="smtpServidor" placeholder="smtp.empresa.com.br" />
+            </label>
+            <label class="field-label">
+                <span>Porta</span>
+                <input type="number" min="1" max="65535" @bind="smtpPorta" />
+            </label>
+            <label class="field-label">
+                <span>Usuário (vazio = sem autenticação)</span>
+                <input @bind="smtpUsuario" autocomplete="off" />
+            </label>
+            <label class="field-label">
+                <span>Senha @(smtpTemSenha ? "(gravada — deixe em branco para manter)" : "")</span>
+                <input type="password" @bind="smtpSenhaNova" autocomplete="new-password" />
+            </label>
+        </div>
+        <label class="toolbar-check"><input type="checkbox" @bind="smtpSsl" /> Usar TLS (STARTTLS — porta 587)</label>
+    }
+    else if (metodo == MetodoEmail.Microsoft365)
+    {
+        <p class="dash-note">Envia pelo Microsoft Graph com o aplicativo configurado abaixo. O aplicativo precisa da permissão de
+            <strong>aplicativo</strong> <code>Mail.Send</code> com consentimento do administrador, e o remetente precisa ser uma caixa de correio existente.</p>
+    }
+
+    <div class="form-actions">
+        <button class="btn-pill primary" @onclick="SalvarEmailAsync"><i class="fa-solid fa-check"></i> Salvar e-mail</button>
+        <input class="config-teste" type="email" @bind="emailTeste" placeholder="enviar teste para…" aria-label="Destinatário do e-mail de teste" />
+        <button class="btn-pill" disabled="@(ocupado || string.IsNullOrWhiteSpace(emailTeste))" @onclick="TestarEmailAsync">
+            <i class="fa-solid @(ocupado ? "fa-spinner fa-spin" : "fa-paper-plane")"></i> Enviar e-mail de teste
+        </button>
+    </div>
+</section>
+
+@* ── Microsoft 365 ──────────────────────────────────────── *@
+<section class="form-panel config-secao">
+    <h2 class="relatorio-titulo">
+        <svg viewBox="0 0 21 21" width="16" height="16" aria-hidden="true">
+            <rect x="1" y="1" width="9" height="9" fill="#f25022" /><rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+            <rect x="1" y="11" width="9" height="9" fill="#00a4ef" /><rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+        </svg>
+        Integração com o Microsoft 365
+    </h2>
+
+    @if (m365 is { } atual && atual.DiasParaExpirar is { } dias && dias <= 30)
+    {
+        <div class="login-alert" role="alert">
+            <i class="fa-solid fa-triangle-exclamation"></i>
+            @(dias < 0 ? $"A chave do aplicativo VENCEU em {atual.SegredoExpiraEm:dd/MM/yyyy}: o login com Microsoft 365 e o envio de e-mail pelo Graph param de funcionar."
+                       : $"A chave do aplicativo vence em {dias} dia(s) ({atual.SegredoExpiraEm:dd/MM/yyyy}). Gere uma nova no Entra ID e troque aqui.")
+        </div>
+    }
+
+    <details class="config-ajuda">
+        <summary><i class="fa-solid fa-circle-question"></i> Como registrar o aplicativo no Microsoft Entra ID</summary>
+        <ol>
+            <li>No portal <strong>entra.microsoft.com</strong>: Identidade &gt; Aplicativos &gt; <strong>Registros de aplicativo</strong> &gt; Novo registro.</li>
+            <li>Tipos de conta: <em>somente este diretório organizacional</em>. URI de redirecionamento (Web):
+                <code class="config-uri">@UriRetorno</code></li>
+            <li>Copie o <strong>ID do diretório (locatário)</strong> e o <strong>ID do aplicativo (cliente)</strong> para os campos abaixo.</li>
+            <li>Em <strong>Certificados e segredos</strong> &gt; Novo segredo do cliente: copie o <em>Valor</em> para "Chave" e informe a data de expiração.</li>
+            <li>Permissões de API (Microsoft Graph): delegadas <code>openid</code>, <code>profile</code>, <code>email</code>
+                (e, para enviar e-mail pelo Microsoft 365, a de aplicativo <code>Mail.Send</code>). Conceda o consentimento do administrador.</li>
+            <li>O portal precisa estar em <strong>HTTPS</strong> (a Microsoft não aceita retorno para http, exceto localhost).</li>
+        </ol>
+    </details>
+
+    <div class="form-grid audit-grid">
+        <label class="field-label">
+            <span>ID do diretório (Tenant)</span>
+            <input @bind="tenantId" placeholder="00000000-0000-0000-0000-000000000000" autocomplete="off" />
+        </label>
+        <label class="field-label">
+            <span>ID do aplicativo (Client ID)</span>
+            <input @bind="clientId" placeholder="00000000-0000-0000-0000-000000000000" autocomplete="off" />
+        </label>
+        <label class="field-label">
+            <span>Chave (segredo do cliente) @(m365?.TemSegredo == true ? "— gravada; preencha só para TROCAR" : "")</span>
+            <input type="password" @bind="segredoNovo" autocomplete="new-password" placeholder="@(m365?.TemSegredo == true ? "•••••••• (mantida)" : "valor do segredo")" />
+        </label>
+        <label class="field-label">
+            <span>A chave vence em</span>
+            <input type="date" @bind="segredoExpira" />
+        </label>
+    </div>
+    @if (m365?.SegredoAlteradoEm is { } trocada)
+    {
+        <p class="sub-label" style="margin:0;">Chave gravada em @Horario.Fmt(trocada) por @(m365.SegredoAlteradoPor ?? "—").</p>
+    }
+    <label class="toolbar-check" style="margin-top:.75rem;">
+        <input type="checkbox" @bind="loginM365" /> Habilitar o botão <strong>&nbsp;Entrar com Microsoft 365&nbsp;</strong> na tela de login
+    </label>
+
+    <div class="form-actions">
+        <button class="btn-pill primary" @onclick="SalvarM365Async"><i class="fa-solid fa-check"></i> Salvar Microsoft 365</button>
+        <button class="btn-pill" disabled="@ocupado" @onclick="TestarM365Async">
+            <i class="fa-solid @(ocupado ? "fa-spinner fa-spin" : "fa-plug")"></i> Testar conexão
+        </button>
+    </div>
+    <p class="dash-note">
+        Para trocar a chave por segurança: gere um segredo novo no Entra ID, cole aqui com a nova data de vencimento e salve.
+        O login passa a usar a nova chave na hora; depois apague o segredo antigo no Entra ID.
+        Usuários entram com Microsoft 365 quando o cadastro deles está como <strong>Microsoft 365</strong> com o mesmo e-mail da conta da empresa.
+    </p>
+</section>
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthState { get; set; } = null!;
+
+    private System.Security.Claims.ClaimsPrincipal usuario = new();
+    private string? mensagem;
+    private bool erro;
+    private bool ocupado;
+
+    // Senha
+    private int validadeDias = 90;
+
+    // E-mail
+    private MetodoEmail metodo;
+    private string? remetente, nomeRemetente, smtpServidor, smtpUsuario, smtpSenhaNova, emailTeste;
+    private int smtpPorta = 587;
+    private bool smtpSsl = true, smtpTemSenha;
+
+    // Microsoft 365
+    private ConfigM365? m365;
+    private string? tenantId, clientId, segredoNovo;
+    private DateTime? segredoExpira;
+    private bool loginM365;
+
+    private string UriRetorno => Nav.BaseUri.TrimEnd('/') + "/signin-oidc";
+    private string Login => usuario.FindFirst("username")?.Value ?? usuario.Identity?.Name ?? "?";
+
+    protected override async Task OnInitializedAsync()
+    {
+        usuario = (await AuthState).User;
+        await CarregarAsync();
+    }
+
+    private async Task CarregarAsync()
+    {
+        validadeDias = (await Configuracao.PoliticaSenhaAsync()).ValidadeDias;
+
+        var e = await Configuracao.EmailAsync();
+        (metodo, remetente, nomeRemetente) = (e.Metodo, e.Remetente, e.NomeRemetente);
+        (smtpServidor, smtpPorta, smtpSsl, smtpUsuario, smtpTemSenha) = (e.SmtpServidor, e.SmtpPorta, e.SmtpSsl, e.SmtpUsuario, e.SmtpTemSenha);
+        smtpSenhaNova = null;
+
+        m365 = await Configuracao.M365Async();
+        (tenantId, clientId, segredoExpira, loginM365) = (m365.TenantId, m365.ClientId, m365.SegredoExpiraEm, m365.LoginHabilitado);
+        segredoNovo = null;
+    }
+
+    private async Task SalvarSenhaAsync() => await Executar(async () =>
+    {
+        await Configuracao.SalvarPoliticaSenhaAsync(new PoliticaSenha(validadeDias), Login);
+        return "Política de senha salva.";
+    });
+
+    private async Task SalvarEmailAsync() => await Executar(async () =>
+    {
+        await Configuracao.SalvarEmailAsync(
+            new ConfigEmail(metodo, remetente, nomeRemetente, smtpServidor, smtpPorta, smtpSsl, smtpUsuario, smtpTemSenha),
+            smtpSenhaNova, Login);
+        return "Configuração de e-mail salva.";
+    });
+
+    private async Task TestarEmailAsync() => await Executar(async () =>
+    {
+        await SalvarEmailAsync();
+        if (erro) return mensagem!;
+        await Email.EnviarAsync(emailTeste!.Trim(), "RDSManager — e-mail de teste",
+            $"<p>Este é um e-mail de teste do <strong>RDSManager</strong>, enviado em {Horario.Fmt(DateTime.UtcNow, "dd/MM/yyyy HH:mm")} por {System.Net.WebUtility.HtmlEncode(Login)}.</p>");
+        return $"E-mail de teste enviado para {emailTeste}. Confira a caixa de entrada (e o lixo eletrônico).";
+    });
+
+    private async Task SalvarM365Async() => await Executar(async () =>
+    {
+        if (loginM365 && (string.IsNullOrWhiteSpace(tenantId) || string.IsNullOrWhiteSpace(clientId)
+                          || (string.IsNullOrWhiteSpace(segredoNovo) && m365?.TemSegredo != true)))
+            throw new InvalidOperationException("Para habilitar o login, preencha Tenant, ID do aplicativo e a chave.");
+
+        var trocouChave = !string.IsNullOrWhiteSpace(segredoNovo);
+        await Configuracao.SalvarM365Async(loginM365, tenantId, clientId, segredoNovo, segredoExpira, Login);
+        ConfigurarMicrosoft365.Recarregar(Servicos);   // o login passa a usar a configuração nova na hora
+        return trocouChave ? "Microsoft 365 salvo. A chave nova já está em uso." : "Microsoft 365 salvo.";
+    });
+
+    private async Task TestarM365Async() => await Executar(async () =>
+    {
+        // Testa com o que está na tela (a chave digitada, ou a gravada)
+        await Email.TokenAplicativoM365Async(tenantId?.Trim(), clientId?.Trim(),
+            string.IsNullOrWhiteSpace(segredoNovo) ? null : segredoNovo.Trim());
+        return "Conexão com o Microsoft Entra ID funcionando: Tenant, aplicativo e chave aceitos.";
+    }, recarregar: false);
+
+    private async Task Executar(Func<Task<string>> acao, bool recarregar = true)
+    {
+        ocupado = true;
+        try
+        {
+            if (!await PermissaoService.PossuiAsync(usuario, Permissoes.ConfiguracoesGerenciar))
+                throw new UnauthorizedAccessException("Seu perfil não tem a permissão \"Configurações do sistema\".");
+            mensagem = await acao();
+            erro = false;
+            if (recarregar) await CarregarAsync();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException
+                                   or System.Net.Mail.SmtpException or FormatException or HttpRequestException)
+        {
+            mensagem = ex.Message + (ex.InnerException is { } i ? $" ({i.Message})" : "");
+            erro = true;
+        }
+        finally
+        {
+            ocupado = false;
+        }
+    }
+}

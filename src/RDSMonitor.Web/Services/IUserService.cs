@@ -22,7 +22,15 @@ public enum UserOperationResult
     DadosInvalidos,
     /// <summary>A operação deixaria o sistema sem nenhum administrador ativo.</summary>
     UltimoAdministrador,
+    /// <summary>Outro usuário já usa esse e-mail.</summary>
+    EmailJaExiste,
+    /// <summary>Conta Microsoft 365 precisa de um e-mail válido.</summary>
+    EmailObrigatorio,
 }
+
+/// <summary>Dados do cadastro/edição de usuário.</summary>
+public sealed record DadosUsuario(
+    string DisplayName, int PerfilId, string? Email, TipoAutenticacao Tipo, bool SenhaExpira, bool ExigirTroca);
 
 public interface IUserService
 {
@@ -46,10 +54,10 @@ public interface IUserService
     Task<AppUser?> ObterPorIdAsync(int id);
 
     /// <summary>Cria um novo usuário do painel. Retorna o motivo caso não seja possível.</summary>
-    Task<UserOperationResult> CriarAsync(string username, string displayName, int perfilId, string senhaInicial, bool exigirTroca = true);
+    Task<UserOperationResult> CriarAsync(string username, string? senhaInicial, DadosUsuario dados);
 
     /// <summary>Atualiza nome de exibição e perfil; redefine a senha apenas se <paramref name="novaSenha"/> vier preenchida.</summary>
-    Task<UserOperationResult> EditarAsync(int id, string displayName, int perfilId, string? novaSenha, bool exigirTroca = false);
+    Task<UserOperationResult> EditarAsync(int id, string? novaSenha, DadosUsuario dados);
 
     /// <summary>Habilita ou desabilita o usuário (alterna o campo Ativo).</summary>
     Task<UserOperationResult> AlternarAtivoAsync(int id);

@@ -20,7 +20,14 @@
         {
             <div class="login-alert login-alert-info" role="status">
                 <i class="fa-solid fa-circle-info"></i>
-                Antes de entrar, defina uma senha pessoal. A senha atual é a que você recebeu do administrador.
+                @if (Motivo == "expirada")
+                {
+                    <span>Sua senha venceu. Defina uma senha nova para continuar.</span>
+                }
+                else
+                {
+                    <span>Antes de entrar, defina uma senha pessoal. A senha atual é a que você recebeu do administrador ou por e-mail.</span>
+                }
             </div>
         }
 
@@ -117,4 +124,7 @@
     private string? ObrigatoriaQuery { get; set; }
 
     private bool Obrigatoria => ObrigatoriaQuery == "1";
+
+    [SupplyParameterFromQuery(Name = "motivo")]
+    private string? Motivo { get; set; }
 }

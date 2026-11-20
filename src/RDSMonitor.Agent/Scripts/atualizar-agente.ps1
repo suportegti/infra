@@ -53,7 +53,7 @@ function Copiar([string] $de, [string] $para, [string] $modo, [string[]] $extra)
     # $modo: /E = copia tudo · /MIR = deixa o destino idêntico à origem (remove o que sobrou da
     # versão anterior). /XD protege a pasta de trabalho; /XF protege as configurações.
     # Códigos de saída do robocopy < 8 = sucesso.
-    $args = @($de, $para, $modo, '/R:3', '/W:2', '/NFL', '/NDL', '/NJH', '/NJS', '/NP', '/XD', $Trabalho) + $extra
+    $args = @($de, $para, $modo, '/R:3', '/W:2', '/NFL', '/NDL', '/NJH', '/NJS', '/NP', '/XD', $Trabalho, (Join-Path $Destino 'logs')) + $extra
     & robocopy @args | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "robocopy falhou ($LASTEXITCODE) copiando de $de para $para" }
 }

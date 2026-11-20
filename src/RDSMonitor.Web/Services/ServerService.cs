@@ -220,6 +220,7 @@ public class ServerService : IServerService
 
         server.IsOnline       = true;
         server.LastHeartbeat  = agora;
+        server.UltimoContato  = agora;
         server.CpuPercent     = Math.Round(dto.CpuPercent, 1);
         server.MemoryUsedGb   = Math.Round(dto.MemoryUsedGb, 2);
         server.MemoryTotalGb  = Math.Round(dto.MemoryTotalGb, 2);

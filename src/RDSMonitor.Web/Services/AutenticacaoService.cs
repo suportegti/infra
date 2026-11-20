@@ -6,7 +6,7 @@ using RDSMonitor.Web.Models;
 
 namespace RDSMonitor.Web.Services;
 
-public enum AuthStatus { Sucesso, CredenciaisInvalidas, Bloqueado, TrocaDeSenhaExigida }
+public enum AuthStatus { Sucesso, CredenciaisInvalidas, Bloqueado, TrocaDeSenhaExigida, SenhaExpirada, UsarMicrosoft365 }
 
 /// <summary>Resultado de uma tentativa de login.</summary>
 /// <param name="Usuario">Preenchido só em caso de sucesso.</param>
@@ -25,6 +25,9 @@ public interface IAutenticacaoService
     Task RegistrarLimiteDeTaxaAsync(string? username, string? ip);
     /// <summary>Registra a saída do usuário (botão Sair) no histórico de acessos.</summary>
     Task RegistrarLogoutAsync(string username, string? ip);
+
+    /// <summary>Registra um evento de acesso (login Microsoft 365, recuperação de senha...).</summary>
+    Task RegistrarEventoAsync(string usuario, string? ip, AcessoResultado resultado, string? detalhe);
 }
 
 public class AutenticacaoService : IAutenticacaoService
@@ -42,7 +45,13 @@ public class AutenticacaoService : IAutenticacaoService
     private readonly AppDbContext _db;
     private readonly PasswordHasher<AppUser> _hasher = new();
 
-    public AutenticacaoService(AppDbContext db) => _db = db;
+    private readonly IConfiguracaoService _config;
+
+    public AutenticacaoService(AppDbContext db, IConfiguracaoService config)
+    {
+        _db = db;
+        _config = config;
+    }
 
     public async Task<AuthResultado> AutenticarAsync(string username, string password, string? ip)
     {
@@ -72,17 +81,39 @@ public class AutenticacaoService : IAutenticacaoService
             return new(null, AuthStatus.Bloqueado, restam);
         }
 
+        if (user.TipoAutenticacao == TipoAutenticacao.Microsoft365)
+        {
+            // Conta Microsoft 365 não tem senha local: o login é pelo botão da Microsoft
+            await RegistrarAsync(username, ip, AcessoResultado.ContaMicrosoft365);
+            return new(null, AuthStatus.UsarMicrosoft365);
+        }
+
         var ok = _hasher.VerifyHashedPassword(user, user.PasswordHash, password ?? string.Empty)
                  != PasswordVerificationResult.Failed;
 
-        if (ok && user.TrocarSenhaNoProximoLogin)
+        // Senha temporária enviada por e-mail (vale até expirar; obriga a criar uma senha nova)
+        var temporaria = !ok && user.SenhaTemporariaHash is not null && user.SenhaTemporariaExpiraEm > agora
+                         && _hasher.VerifyHashedPassword(user, user.SenhaTemporariaHash, password ?? string.Empty)
+                            != PasswordVerificationResult.Failed;
+
+        if (temporaria || (ok && user.TrocarSenhaNoProximoLogin))
         {
             // Senha certa, mas o usuário precisa definir a dele antes de entrar
             user.AccessFailedCount = 0;
             user.LockoutEnd        = null;
-            await RegistrarAsync(username, ip, AcessoResultado.TrocaDeSenhaExigida, salvar: false);
+            await RegistrarAsync(username, ip, AcessoResultado.TrocaDeSenhaExigida,
+                temporaria ? "entrou com a senha temporária" : null, salvar: false);
             await _db.SaveChangesAsync();
             return new(user, AuthStatus.TrocaDeSenhaExigida);
+        }
+
+        if (ok && user.SenhaVenceEm((await _config.PoliticaSenhaAsync()).ValidadeDias) is { } vence && vence <= agora)
+        {
+            user.AccessFailedCount = 0;
+            user.LockoutEnd        = null;
+            await RegistrarAsync(username, ip, AcessoResultado.SenhaExpirada, $"venceu em {Horario.Fmt(vence, "dd/MM/yyyy")}", salvar: false);
+            await _db.SaveChangesAsync();
+            return new(user, AuthStatus.SenhaExpirada);
         }
 
         if (ok)
@@ -127,6 +158,9 @@ public class AutenticacaoService : IAutenticacaoService
 
     public Task RegistrarLogoutAsync(string username, string? ip) =>
         RegistrarAsync(username, ip, AcessoResultado.Logout);
+
+    public Task RegistrarEventoAsync(string usuario, string? ip, AcessoResultado resultado, string? detalhe) =>
+        RegistrarAsync(usuario, ip, resultado, detalhe);
 
     private async Task RegistrarAsync(string usuario, string? ip, AcessoResultado resultado, string? detalhe = null, bool salvar = true)
     {

@@ -4,15 +4,16 @@ using RDSMonitor.Web.Data;
 namespace RDSMonitor.Web.Services;
 
 /// <summary>
-/// Serviço em segundo plano que marca como offline os servidores cujo último
-/// heartbeat é mais antigo que <see cref="LimiteSemHeartbeat"/>. O heartbeat
-/// (ServerService.ProcessHeartbeatAsync) só liga o IsOnline; é aqui que ele
-/// volta a ser desligado quando o agente para de reportar.
+/// Serviço em segundo plano que marca como offline os servidores sem contato do
+/// agente há mais de <see cref="LimiteSemContato"/>. O contato é o heartbeat
+/// (30 s) ou a busca de comandos (3 s), então um agente parado ou desinstalado
+/// aparece offline em até ~25 s. Quando o serviço do agente é parado de forma
+/// normal, ele mesmo avisa o portal (POST /api/agent/offline) e o efeito é imediato.
 /// </summary>
 public class ServerHealthMonitor : BackgroundService
 {
-    private static readonly TimeSpan Intervalo          = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan LimiteSemHeartbeat = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan Intervalo        = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan LimiteSemContato = TimeSpan.FromSeconds(20);
 
     private readonly IServiceScopeFactory          _scopeFactory;
     private readonly ILogger<ServerHealthMonitor>  _log;
@@ -53,14 +54,14 @@ public class ServerHealthMonitor : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        var limite = DateTime.UtcNow - LimiteSemHeartbeat;
+        var limite = DateTime.UtcNow - LimiteSemContato;
 
         var afetados = await db.Servers
-            .Where(s => s.IsOnline && (s.LastHeartbeat == null || s.LastHeartbeat < limite))
+            .Where(s => s.IsOnline && (s.UltimoContato ?? s.LastHeartbeat ?? DateTime.MinValue) < limite)
             .ExecuteUpdateAsync(s => s.SetProperty(x => x.IsOnline, false), ct);
 
         if (afetados > 0)
-            _log.LogWarning("{Qtd} servidor(es) marcado(s) como offline (sem heartbeat há mais de {Min} min).",
-                afetados, LimiteSemHeartbeat.TotalMinutes);
+            _log.LogWarning("{Qtd} servidor(es) marcado(s) como offline (sem contato do agente há mais de {Seg} s).",
+                afetados, LimiteSemContato.TotalSeconds);
     }
 }

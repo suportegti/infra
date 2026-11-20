@@ -128,6 +128,8 @@
         sessoes = sessoes.Where(x => SessaoCasa(x.sv, x.sess)
                                   || (PesquisaEmProcessos && ProcessosVisiveis(x.sv.Id, x.sess.RdsSessionId, filtrarPelaBusca: true).Count > 0)).ToList();
 
+    sessoes = ordem.Aplicar(sessoes, ColunasOrdenaveis).ToList();
+
     var colunas = PodeAgirNaSessao ? 11 : 10;
 }
 
@@ -175,15 +177,15 @@ else
         <thead>
             <tr>
                 <th></th>
-                <th>Servidor</th>
-                <th>Usuário</th>
-                <th>Sessão</th>
-                <th>Origem</th>
-                <th>Estado</th>
-                <th>CPU</th>
-                <th>Memória</th>
-                <th>Login</th>
-                <th>Ociosidade</th>
+                <ThOrdenavel Titulo="Servidor"   Campo="servidor"   Ordem="ordem" />
+                <ThOrdenavel Titulo="Usuário"    Campo="usuario"    Ordem="ordem" />
+                <ThOrdenavel Titulo="Sessão"     Campo="sessao"     Ordem="ordem" />
+                <ThOrdenavel Titulo="Origem"     Campo="origem"     Ordem="ordem" />
+                <ThOrdenavel Titulo="Estado"     Campo="estado"     Ordem="ordem" />
+                <ThOrdenavel Titulo="CPU"        Campo="cpu"        Ordem="ordem" ComecaDecrescente />
+                <ThOrdenavel Titulo="Memória"    Campo="memoria"    Ordem="ordem" ComecaDecrescente />
+                <ThOrdenavel Titulo="Login"      Campo="login"      Ordem="ordem" ComecaDecrescente />
+                <ThOrdenavel Titulo="Ociosidade" Campo="ociosidade" Ordem="ordem" ComecaDecrescente />
                 @if (PodeAgirNaSessao) { <th>Ações</th> }
             </tr>
         </thead>
@@ -376,6 +378,22 @@ else
     private string  estadoSelecionado  = string.Empty;
     private bool    mostrarSistema;
     private bool    mostrarProcessos;
+
+    // Ordenação da tabela (clique no cabeçalho); padrão: login mais recente primeiro
+    private readonly Ordenacao ordem = new("login", desc: true);
+    private static readonly IReadOnlyDictionary<string, Func<(Server sv, Session sess), object?>> ColunasOrdenaveis =
+        new Dictionary<string, Func<(Server sv, Session sess), object?>>
+        {
+            ["servidor"]   = x => x.sv.Name,
+            ["usuario"]    = x => x.sess.Username,
+            ["sessao"]     = x => x.sess.RdsSessionId,
+            ["origem"]     = x => x.sess.ClientName ?? x.sess.ClientIp,
+            ["estado"]     = x => x.sess.State.ToString(),
+            ["cpu"]        = x => x.sess.CpuPercent,
+            ["memoria"]    = x => x.sess.MemoryMb,
+            ["login"]      = x => x.sess.LogonTime,
+            ["ociosidade"] = x => x.sess.IdleTimeMinutes,
+        };
     private (int?, string?, string?) filtrosDaUrl;
     private System.Security.Claims.ClaimsPrincipal usuario = new();
 

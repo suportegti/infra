@@ -11,6 +11,7 @@
   <ItemGroup>
     <!-- EF Core + SQLite (V1). Para migrar ao SQL Server, adicionar
          Microsoft.EntityFrameworkCore.SqlServer e ajustar Program.cs. -->
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="8.0.11" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.10" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.10">
       <PrivateAssets>all</PrivateAssets>

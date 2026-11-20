@@ -173,6 +173,12 @@ public class CommandService : ICommandService
         // Servidor não cadastrado ou desabilitado não recebe comandos.
         if (server is null || !server.IsEnabled) return new();
 
+        // A busca de comandos (a cada 3 s) também prova que o agente está vivo:
+        // é o que permite marcar o servidor offline em até 30 s quando ele some.
+        server.UltimoContato = DateTime.UtcNow;
+        if (!server.IsOnline && server.LastHeartbeat is not null) server.IsOnline = true;
+        await _db.SaveChangesAsync();
+
         var pendentes = await _db.Commands
             .Where(c => c.ServerId == server.Id && c.Status == CommandStatus.Pending)
             .OrderBy(c => c.CreatedAt)

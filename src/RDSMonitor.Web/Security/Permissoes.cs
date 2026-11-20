@@ -34,6 +34,7 @@ public static class Permissoes
     public const string ComandosManuais   = "comandos.manuais";
     public const string UsuariosGerenciar = "usuarios.gerenciar";
     public const string PerfisGerenciar   = "perfis.gerenciar";
+    public const string ConfiguracoesGerenciar = "configuracoes.gerenciar";
 
     public sealed record Definicao(string Codigo, string Nome, string Descricao);
     public sealed record Grupo(string Nome, IReadOnlyList<Definicao> Itens);
@@ -71,6 +72,7 @@ public static class Permissoes
             new Definicao(ComandosManuais,   "Comandos manuais",     "Tela de ações administrativas (comando por ID de sessão/PID)."),
             new Definicao(UsuariosGerenciar, "Gerenciar usuários",   "Criar, editar e desabilitar usuários do portal."),
             new Definicao(PerfisGerenciar,   "Gerenciar perfis",     "Criar perfis e definir as permissões de cada um."),
+            new Definicao(ConfiguracoesGerenciar, "Configurações do sistema", "Política de senha, envio de e-mail e integração com o Microsoft 365."),
         }),
     };
 

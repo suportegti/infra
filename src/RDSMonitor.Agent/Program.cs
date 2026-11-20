@@ -82,6 +82,9 @@ builder.Logging.AddEventLog(o =>
     o.LogName    = "Application";
 });
 
+// ── Log local em arquivo (logs\agente-AAAAMMDD.log, 30 dias) ──────────────────
+builder.Logging.AddProvider(new ArquivoLoggerProvider(Path.Combine(AppContext.BaseDirectory, "logs")));
+
 var host = builder.Build();
 host.Run();
 return 0;

@@ -77,6 +77,13 @@
                         </NavLink>
                     </li>
                 </AuthorizeView>
+                <AuthorizeView Policy="@Permissoes.ConfiguracoesGerenciar">
+                    <li class="nav-item">
+                        <NavLink class="nav-link" href="configuracoes">
+                            <i class="fa-solid fa-gear"></i> Configurações
+                        </NavLink>
+                    </li>
+                </AuthorizeView>
             </ul>
         </details>
     }
@@ -96,6 +103,7 @@
         var p = await PermissaoService.DoUsuarioAsync((await AuthState).User);
         temAdministracao = p.Contains(Permissoes.ComandosManuais)
                         || p.Contains(Permissoes.AgentesAtualizar)
+                        || p.Contains(Permissoes.ConfiguracoesGerenciar)
                         || p.Contains(Permissoes.UsuariosGerenciar)
                         || p.Contains(Permissoes.PerfisGerenciar);
     }

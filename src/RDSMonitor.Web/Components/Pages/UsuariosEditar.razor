@@ -2,6 +2,7 @@
 @attribute [Authorize(Policy = Permissoes.UsuariosGerenciar)]
 @inject IUserService UserService
 @inject IPerfilService PerfilService
+@inject IConfiguracaoService Configuracao
 
 <PageTitle>Editar Usuário · RDSManager</PageTitle>
 
@@ -26,13 +27,21 @@ else
     {
         <div class="login-alert" role="alert">Este é o último administrador ativo: o perfil dele não pode ser trocado.</div>
     }
+    else if (Erro == "email-existe")
+    {
+        <div class="login-alert" role="alert">Outro usuário já usa esse e-mail.</div>
+    }
+    else if (Erro == "email-m365")
+    {
+        <div class="login-alert" role="alert">Contas Microsoft 365 precisam de um e-mail válido (é o login da pessoa na Microsoft).</div>
+    }
     else if (Erro == "dados-invalidos")
     {
         <div class="login-alert" role="alert">Preencha o nome de exibição corretamente.</div>
     }
 
     <div class="form-panel">
-        <form method="post" action="/api/usuarios/editar">
+        <form method="post" action="/api/usuarios/editar" class="form-usuario" data-tipo="@Usuario.TipoAutenticacao">
             <input type="hidden" name="id" value="@Usuario.Id" />
 
             <div class="form-grid">
@@ -53,19 +62,45 @@ else
                         }
                     </select>
                 </label>
-                <label class="field field-senha">
+                <label class="field">
+                    <i class="fa-solid fa-envelope"></i>
+                    <input name="email" type="email" maxlength="200" value="@Usuario.Email" placeholder="E-mail (recuperação de senha / login Microsoft 365)" />
+                </label>
+                <label class="field">
+                    <i class="fa-solid fa-right-to-bracket"></i>
+                    <select name="tipoAutenticacao" class="tipo-autenticacao" aria-label="Como o usuário entra">
+                        <option value="Local" selected="@(Usuario.TipoAutenticacao == TipoAutenticacao.Local)">Login local (usuário e senha do portal)</option>
+                        <option value="Microsoft365" selected="@(Usuario.TipoAutenticacao == TipoAutenticacao.Microsoft365)">Microsoft 365 (conta da empresa, pelo e-mail)</option>
+                    </select>
+                </label>
+                <label class="field field-senha so-local">
                     <i class="fa-solid fa-key"></i>
                     <input name="novaSenha" type="password" placeholder="Nova senha (deixe em branco para não alterar)" minlength="8" />
                     <button type="button" class="olho-senha" tabindex="-1" aria-label="Mostrar senha (mantenha pressionado)" title="Mantenha pressionado para ver a senha"><i class="fa-solid fa-eye"></i></button>
                 </label>
             </div>
 
-            <label class="toolbar-check" style="margin-top:.75rem;">
-                <input type="checkbox" name="exigirTroca" value="true" checked="@Usuario.TrocarSenhaNoProximoLogin" />
-                Exigir troca de senha no próximo login
-            </label>
-            <p class="dash-note" style="margin-top:.35rem;">
-                Ao redefinir a senha de alguém, deixe marcado: a pessoa entra com a senha que você informou e é obrigada a criar a dela.
+            <div class="so-local">
+                <div class="form-checks">
+                    <label class="toolbar-check">
+                        <input type="checkbox" name="exigirTroca" value="true" checked="@Usuario.TrocarSenhaNoProximoLogin" />
+                        Exigir troca de senha no próximo login
+                    </label>
+                    <label class="toolbar-check">
+                        <input type="checkbox" name="senhaExpira" value="true" checked="@Usuario.SenhaExpira" />
+                        Senha expira a cada @validadeDias dias
+                    </label>
+                </div>
+                <p class="dash-note" style="margin-top:.35rem;">
+                    Ao redefinir a senha de alguém, deixe "Exigir troca" marcado: a pessoa entra com a senha que você informou e cria a dela.
+                    @if (Usuario.SenhaVenceEm(validadeDias) is { } vence)
+                    {
+                        <span>A senha atual vence em <strong>@Horario.Fmt(vence, "dd/MM/yyyy")</strong>.</span>
+                    }
+                </p>
+            </div>
+            <p class="so-m365 dash-note" style="margin-top:.75rem;">
+                A pessoa entra pelo botão <strong>Entrar com Microsoft 365</strong> usando a conta da empresa com este e-mail.
             </p>
 
             <div class="form-actions">
@@ -87,8 +122,11 @@ else
     private AppUser? Usuario { get; set; }
     private List<RDSMonitor.Web.Data.Entities.Perfil> Perfis { get; set; } = new();
 
+    private int validadeDias = 90;
+
     protected override async Task OnInitializedAsync()
     {
+        validadeDias = (await Configuracao.PoliticaSenhaAsync()).ValidadeDias;
         Usuario = await UserService.ObterPorIdAsync(Id);
         Perfis  = await PerfilService.ListarParaSelecaoAsync();
     }
