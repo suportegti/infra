@@ -14,7 +14,11 @@
     /// <summary>Colunas de data/hora começam pela mais recente.</summary>
     [Parameter] public bool ComecaDecrescente { get; set; }
 
-    [Parameter] public EventCallback OnAlterada { get; set; }
+    /// <summary>
+    /// Obrigatório: é o callback que faz a PÁGINA re-renderizar com a nova ordem
+    /// (sem ele só o cabeçalho mudava e a tabela continuava igual).
+    /// </summary>
+    [Parameter, EditorRequired] public EventCallback OnAlterada { get; set; }
 
     private bool Ativa => Ordem.Campo == Campo;
 

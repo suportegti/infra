@@ -15,7 +15,11 @@ public sealed record PoliticaSenha(int ValidadeDias);
 public sealed record ConfigEmail(
     MetodoEmail Metodo,
     string? Remetente, string? NomeRemetente,
-    string? SmtpServidor, int SmtpPorta, bool SmtpSsl, string? SmtpUsuario, bool SmtpTemSenha);
+    string? SmtpServidor, int SmtpPorta, bool SmtpSsl, string? SmtpUsuario, bool SmtpTemSenha,
+    /// <summary>Endereço do portal usado nos links dos e-mails (ex.: https://192.168.153.16:5001).</summary>
+    string? EnderecoPortal = null,
+    /// <summary>Enviar e-mail de boas-vindas ao criar um usuário com e-mail.</summary>
+    bool AvisarNovoUsuario = true);
 
 /// <summary>Integração com o Microsoft 365 (Entra ID): login e, opcionalmente, envio de e-mail.</summary>
 public sealed record ConfigM365(
@@ -57,6 +61,7 @@ public class ConfiguracaoService : IConfiguracaoService
     private const string KEmailMetodo = "Email.Metodo", KRemetente = "Email.Remetente", KNomeRemetente = "Email.NomeRemetente";
     private const string KSmtpServidor = "Smtp.Servidor", KSmtpPorta = "Smtp.Porta", KSmtpSsl = "Smtp.Ssl",
                          KSmtpUsuario = "Smtp.Usuario", KSmtpSenha = "Smtp.Senha";
+    private const string KEnderecoPortal = "Portal.Endereco", KAvisarNovoUsuario = "Email.AvisarNovoUsuario";
     private const string KM365Login = "M365.LoginHabilitado", KM365Tenant = "M365.TenantId", KM365Client = "M365.ClientId",
                          KM365Segredo = "M365.Segredo", KM365Expira = "M365.SegredoExpiraEm";
 
@@ -88,7 +93,8 @@ public class ConfiguracaoService : IConfiguracaoService
             Enum.TryParse<MetodoEmail>(V(d, KEmailMetodo), out var m) ? m : MetodoEmail.Desligado,
             V(d, KRemetente), V(d, KNomeRemetente) ?? "RDSManager",
             V(d, KSmtpServidor), int.TryParse(V(d, KSmtpPorta), out var porta) ? porta : 587,
-            V(d, KSmtpSsl) != "false", V(d, KSmtpUsuario), V(d, KSmtpSenha) is not null);
+            V(d, KSmtpSsl) != "false", V(d, KSmtpUsuario), V(d, KSmtpSenha) is not null,
+            V(d, KEnderecoPortal), V(d, KAvisarNovoUsuario) != "false");
     }
 
     public async Task<ConfigM365> M365Async()
@@ -119,11 +125,17 @@ public class ConfiguracaoService : IConfiguracaoService
 
     public async Task SalvarEmailAsync(ConfigEmail c, string? novaSenhaSmtp, string usuario)
     {
+        if (!string.IsNullOrWhiteSpace(c.EnderecoPortal)
+            && !(Uri.TryCreate(c.EnderecoPortal.Trim(), UriKind.Absolute, out var u) && (u.Scheme == "https" || u.Scheme == "http")))
+            throw new InvalidOperationException("Endereço do portal inválido. Use o endereço completo, ex.: https://192.168.153.16:5001");
+
         var valores = new List<(string, string?)>
         {
             (KEmailMetodo, c.Metodo.ToString()), (KRemetente, Limpo(c.Remetente)), (KNomeRemetente, Limpo(c.NomeRemetente)),
             (KSmtpServidor, Limpo(c.SmtpServidor)), (KSmtpPorta, c.SmtpPorta.ToString()),
             (KSmtpSsl, c.SmtpSsl ? "true" : "false"), (KSmtpUsuario, Limpo(c.SmtpUsuario)),
+            (KEnderecoPortal, Limpo(c.EnderecoPortal)?.TrimEnd('/')),
+            (KAvisarNovoUsuario, c.AvisarNovoUsuario ? "true" : "false"),
         };
         if (!string.IsNullOrEmpty(novaSenhaSmtp)) valores.Add((KSmtpSenha, _protetor.Protect(novaSenhaSmtp)));
         await GravarAsync(usuario, valores.ToArray());

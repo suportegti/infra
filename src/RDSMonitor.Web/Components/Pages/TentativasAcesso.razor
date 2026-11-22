@@ -1,0 +1,163 @@
+@page "/tentativas-acesso"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = Permissoes.AuditoriaVer)]
+@inject IAuditoriaService AuditoriaService
+
+<PageTitle>Tentativas de acesso · RDSManager</PageTitle>
+
+<div class="dash-header">
+    <h1>Tentativas de acesso</h1>
+    <p>Logins no portal (com sucesso ou não), saídas, trocas e recuperações de senha, com usuário e IP de origem.</p>
+</div>
+
+<section class="form-panel audit-filtros">
+    <FiltroPeriodo Periodo="periodo" OnAlterado="PesquisarAsync" />
+
+    <div class="form-grid audit-grid">
+        <label class="field-label">
+            <span>Usuário</span>
+            <input @bind="filtro.Usuario" list="acessos-usuarios" placeholder="login digitado" @onkeydown="EnterAsync" />
+            <datalist id="acessos-usuarios">
+                @foreach (var u in usuarios) { <option value="@u"></option> }
+            </datalist>
+        </label>
+        <label class="field-label">
+            <span>Origem (IP)</span>
+            <input @bind="filtro.Ip" placeholder="endereço ou parte dele" @onkeydown="EnterAsync" />
+        </label>
+        <label class="field-label">
+            <span>Resultado</span>
+            <select @bind="resultadoTexto" @bind:after="PesquisarAsync">
+                <option value="">Todos</option>
+                <option value="falhas">Somente falhas</option>
+                @foreach (var r in Enum.GetValues<AcessoResultado>())
+                {
+                    <option value="@r">@AcessoLog.Descrever(r)</option>
+                }
+            </select>
+        </label>
+    </div>
+
+    <div class="form-actions">
+        <button class="btn-pill primary" @onclick="PesquisarAsync"><i class="fa-solid fa-magnifying-glass"></i> Pesquisar</button>
+        <button class="btn-pill" @onclick="LimparAsync"><i class="fa-solid fa-eraser"></i> Limpar filtros</button>
+        <a class="btn-pill" href="@Url("xlsx")" download><i class="fa-solid fa-file-excel"></i> Exportar Excel</a>
+        <a class="btn-pill" href="@Url("csv")" download><i class="fa-solid fa-file-csv"></i> Exportar CSV</a>
+    </div>
+</section>
+
+<p class="search-summary" role="status">
+    @if (carregando)
+    {
+        <span><i class="fa-solid fa-spinner fa-spin"></i> Pesquisando…</span>
+    }
+    else
+    {
+        <span>
+            <strong>@itens.Count</strong> tentativa(s)@(truncado ? $" — exibindo as {filtro.Limite} mais recentes; refine o período ou exporte" : "").
+            @if (itens.Count > 0)
+            {
+                <text> @falhas falha(s) · @usuariosDistintos usuário(s) · @ipsDistintos IP(s).</text>
+            }
+        </span>
+    }
+</p>
+
+@if (itens.Count > 0)
+{
+    <table class="data-table audit-table">
+        <thead>
+            <tr>
+                <ThOrdenavel Titulo="Data/hora"   Campo="data"      Ordem="ordem" ComecaDecrescente OnAlterada="Reordenar" />
+                <ThOrdenavel Titulo="Usuário"     Campo="usuario"   Ordem="ordem" OnAlterada="Reordenar" />
+                <ThOrdenavel Titulo="Origem (IP)" Campo="ip"        Ordem="ordem" OnAlterada="Reordenar" />
+                <ThOrdenavel Titulo="Resultado"   Campo="resultado" Ordem="ordem" OnAlterada="Reordenar" />
+                <ThOrdenavel Titulo="Detalhe"     Campo="detalhe"   Ordem="ordem" OnAlterada="Reordenar" />
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var a in ordem.Aplicar(itens, AuditoriaOrdenacao.Acessos))
+            {
+                <tr>
+                    <td class="mono">@Horario.Fmt(a.DataHora, "dd/MM/yyyy HH:mm:ss")</td>
+                    <td>@a.Usuario</td>
+                    <td class="mono">@(a.Ip ?? "—")</td>
+                    <td>
+                        <span class="status-dot @AcessoLog.Css(a.Resultado)"></span>
+                        @AcessoLog.Descrever(a.Resultado)
+                    </td>
+                    <td class="audit-detalhes" title="@a.Detalhe">@(a.Detalhe ?? "—")</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+else if (!carregando)
+{
+    <p class="dash-note">Nenhuma tentativa de acesso com esses filtros.</p>
+}
+
+@code {
+    private readonly FiltroAcessos filtro = new();
+    private readonly PeriodoFiltro periodo = new("1h");
+    private readonly Ordenacao ordem = new("data", desc: true);
+    private string resultadoTexto = string.Empty;
+
+    private List<AcessoLog> itens = new();
+    private List<string> usuarios = new();
+    private bool truncado;
+    private bool carregando;
+    private int falhas, usuariosDistintos, ipsDistintos;
+
+    protected override async Task OnInitializedAsync()
+    {
+        usuarios = await AuditoriaService.ListarUsuariosAcessosAsync();
+        await PesquisarAsync();
+    }
+
+    private async Task PesquisarAsync()
+    {
+        if (periodo.Invalido) return;
+        filtro.DeLocal   = periodo.DeLocal;
+        filtro.AteLocal  = periodo.AteLocal;
+        filtro.SoFalhas  = resultadoTexto == "falhas";
+        filtro.Resultado = Enum.TryParse<AcessoResultado>(resultadoTexto, out var r) ? r : null;
+
+        carregando = true;
+        StateHasChanged();
+        (itens, truncado) = await AuditoriaService.PesquisarAcessosAsync(filtro);
+        falhas            = itens.Count(a => RDSMonitor.Web.Services.AuditoriaService.FalhasAcesso.Contains(a.Resultado));
+        usuariosDistintos = itens.Select(a => a.Usuario.ToLower()).Distinct().Count();
+        ipsDistintos      = itens.Where(a => a.Ip != null).Select(a => a.Ip).Distinct().Count();
+        carregando = false;
+    }
+
+    /// <summary>Só re-renderiza: a ordenação é aplicada na própria tabela.</summary>
+    private void Reordenar() { }
+
+    private async Task LimparAsync()
+    {
+        filtro.Usuario = filtro.Ip = null;
+        resultadoTexto = string.Empty;
+        periodo.Aplicar("1h");
+        await PesquisarAsync();
+    }
+
+    private async Task EnterAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await PesquisarAsync();
+    }
+
+    private string Url(string formato)
+    {
+        var q = new List<string>();
+        void Add(string k, string? v) { if (!string.IsNullOrWhiteSpace(v)) q.Add($"{k}={Uri.EscapeDataString(v)}"); }
+        Add("de",        PeriodoFiltro.ParaUrl(periodo.DeLocal));
+        Add("ate",       PeriodoFiltro.ParaUrl(periodo.AteLocal));
+        Add("usuario",   filtro.Usuario);
+        Add("ip",        filtro.Ip);
+        Add("resultado", resultadoTexto);
+        Add("ordenar",   ordem.ParaUrl());
+        return $"/api/acessos/{formato}" + (q.Count > 0 ? "?" + string.Join("&", q) : "");
+    }
+}

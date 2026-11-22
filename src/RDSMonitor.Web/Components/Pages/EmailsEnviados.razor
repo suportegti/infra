@@ -1,0 +1,188 @@
+@page "/emails-enviados"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = Permissoes.AuditoriaVer)]
+@inject IEmailService EmailService
+
+<PageTitle>E-mails enviados · RDSManager</PageTitle>
+
+<div class="dash-header">
+    <h1>E-mails enviados</h1>
+    <p>Todos os e-mails que o portal tentou enviar, com a funcionalidade que disparou, o destinatário e o resultado. O conteúdo não é guardado (pode conter senhas temporárias).</p>
+</div>
+
+<section class="form-panel audit-filtros">
+    <FiltroPeriodo Periodo="periodo" OnAlterado="PesquisarAsync" />
+
+    <div class="form-grid audit-grid">
+        <label class="field-label">
+            <span>Funcionalidade</span>
+            <select @bind="origemTexto" @bind:after="PesquisarAsync">
+                <option value="">Todas</option>
+                @foreach (var o in Enum.GetValues<OrigemEmail>())
+                {
+                    <option value="@o">@EmailEnviado.Descrever(o)</option>
+                }
+            </select>
+        </label>
+        <label class="field-label">
+            <span>Resultado</span>
+            <select @bind="resultadoTexto" @bind:after="PesquisarAsync">
+                <option value="">Todos</option>
+                <option value="ok">Enviado</option>
+                <option value="falha">Falhou</option>
+            </select>
+        </label>
+        <label class="field-label">
+            <span>Destinatário, assunto ou usuário</span>
+            <input @bind="filtro.Texto" placeholder="parte do texto" @onkeydown="EnterAsync" />
+        </label>
+    </div>
+
+    <div class="form-actions">
+        <button class="btn-pill primary" @onclick="PesquisarAsync"><i class="fa-solid fa-magnifying-glass"></i> Pesquisar</button>
+        <button class="btn-pill" @onclick="LimparAsync"><i class="fa-solid fa-eraser"></i> Limpar filtros</button>
+        <a class="btn-pill" href="@Url("xlsx")" download><i class="fa-solid fa-file-excel"></i> Exportar Excel</a>
+        <a class="btn-pill" href="@Url("csv")" download><i class="fa-solid fa-file-csv"></i> Exportar CSV</a>
+    </div>
+</section>
+
+<p class="search-summary" role="status">
+    @if (carregando)
+    {
+        <span><i class="fa-solid fa-spinner fa-spin"></i> Pesquisando…</span>
+    }
+    else
+    {
+        <span>
+            <strong>@itens.Count</strong> e-mail(s)@(truncado ? $" — exibindo os {filtro.Limite} mais recentes; refine o período ou exporte" : "").
+            @if (itens.Count > 0) { <text> @itens.Count(e => e.Sucesso) enviado(s), @itens.Count(e => !e.Sucesso) com falha.</text> }
+        </span>
+    }
+</p>
+
+@if (itens.Count > 0)
+{
+    <table class="data-table audit-table">
+        <thead>
+            <tr>
+                <ThOrdenavel Titulo="Data/hora"      Campo="data"         Ordem="ordem" ComecaDecrescente OnAlterada="Reordenar" />
+                <ThOrdenavel Titulo="Funcionalidade" Campo="origem"       Ordem="ordem" OnAlterada="Reordenar" />
+                <ThOrdenavel Titulo="Destinatário"   Campo="para"         Ordem="ordem" OnAlterada="Reordenar" />
+                <ThOrdenavel Titulo="Assunto"        Campo="assunto"      Ordem="ordem" OnAlterada="Reordenar" />
+                <ThOrdenavel Titulo="Usuário"        Campo="usuario"      Ordem="ordem" OnAlterada="Reordenar" />
+                <ThOrdenavel Titulo="Disparado por"  Campo="disparadopor" Ordem="ordem" OnAlterada="Reordenar" />
+                <ThOrdenavel Titulo="Método"         Campo="metodo"       Ordem="ordem" OnAlterada="Reordenar" />
+                <ThOrdenavel Titulo="Resultado"      Campo="resultado"    Ordem="ordem" OnAlterada="Reordenar" />
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var e in ordem.Aplicar(itens, ColunasEmail))
+            {
+                <tr>
+                    <td class="mono">@Horario.Fmt(e.DataHora, "dd/MM/yyyy HH:mm:ss")</td>
+                    <td>@EmailEnviado.Descrever(e.Origem)</td>
+                    <td class="mono">@e.Para</td>
+                    <td>@e.Assunto</td>
+                    <td>@(e.UsuarioRelacionado ?? "—")</td>
+                    <td>
+                        @(e.DisparadoPor ?? "—")
+                        @if (e.Ip is not null) { <span class="sub-label mono">@e.Ip</span> }
+                    </td>
+                    <td>@NomeMetodo(e.Metodo)</td>
+                    <td>
+                        <span class="status-dot @(e.Sucesso ? "active" : "disconnected")"></span>
+                        @(e.Sucesso ? "Enviado" : "Falhou")
+                        @if (!string.IsNullOrEmpty(e.Erro))
+                        {
+                            <span class="sub-label audit-resultado" title="@e.Erro">@e.Erro</span>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    <p class="dash-note">"Enviado" significa que o servidor de e-mail (SMTP ou Microsoft 365) aceitou a mensagem. Se a pessoa não recebeu, confira o lixo eletrônico e o rastreamento de mensagens do servidor de e-mail.</p>
+}
+else if (!carregando)
+{
+    <p class="dash-note">Nenhum e-mail com esses filtros.</p>
+}
+
+@code {
+    private readonly FiltroEmails filtro = new();
+    private readonly PeriodoFiltro periodo = new("7d");
+    private readonly Ordenacao ordem = new("data", desc: true);
+    private string origemTexto = string.Empty;
+    private string resultadoTexto = string.Empty;
+
+    private List<EmailEnviado> itens = new();
+    private bool truncado;
+    private bool carregando;
+
+    /// <summary>Colunas ordenáveis (as mesmas das exportações).</summary>
+    public static readonly IReadOnlyDictionary<string, Func<EmailEnviado, object?>> ColunasEmail =
+        new Dictionary<string, Func<EmailEnviado, object?>>
+        {
+            ["data"]         = e => e.DataHora,
+            ["origem"]       = e => EmailEnviado.Descrever(e.Origem),
+            ["para"]         = e => e.Para,
+            ["assunto"]      = e => e.Assunto,
+            ["usuario"]      = e => e.UsuarioRelacionado,
+            ["disparadopor"] = e => e.DisparadoPor,
+            ["metodo"]       = e => e.Metodo,
+            ["resultado"]    = e => e.Sucesso ? "Enviado" : "Falhou",
+        };
+
+    public static string NomeMetodo(string? m) => m switch
+    {
+        "Smtp"         => "SMTP",
+        "Microsoft365" => "Microsoft 365",
+        null or ""     => "—",
+        _              => m,
+    };
+
+    protected override async Task OnInitializedAsync() => await PesquisarAsync();
+
+    private async Task PesquisarAsync()
+    {
+        if (periodo.Invalido) return;
+        filtro.DeLocal  = periodo.DeLocal;
+        filtro.AteLocal = periodo.AteLocal;
+        filtro.Origem   = Enum.TryParse<OrigemEmail>(origemTexto, out var o) ? o : null;
+        filtro.Sucesso  = resultadoTexto switch { "ok" => true, "falha" => false, _ => null };
+
+        carregando = true;
+        StateHasChanged();
+        (itens, truncado) = await EmailService.PesquisarEnviadosAsync(filtro);
+        carregando = false;
+    }
+
+    /// <summary>Só re-renderiza: a ordenação é aplicada na própria tabela.</summary>
+    private void Reordenar() { }
+
+    private async Task LimparAsync()
+    {
+        filtro.Texto = null;
+        origemTexto = resultadoTexto = string.Empty;
+        periodo.Aplicar("7d");
+        await PesquisarAsync();
+    }
+
+    private async Task EnterAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await PesquisarAsync();
+    }
+
+    private string Url(string formato)
+    {
+        var q = new List<string>();
+        void Add(string k, string? v) { if (!string.IsNullOrWhiteSpace(v)) q.Add($"{k}={Uri.EscapeDataString(v)}"); }
+        Add("de",        PeriodoFiltro.ParaUrl(periodo.DeLocal));
+        Add("ate",       PeriodoFiltro.ParaUrl(periodo.AteLocal));
+        Add("origem",    origemTexto);
+        Add("resultado", resultadoTexto);
+        Add("texto",     filtro.Texto);
+        Add("ordenar",   ordem.ParaUrl());
+        return $"/api/emails/{formato}" + (q.Count > 0 ? "?" + string.Join("&", q) : "");
+    }
+}

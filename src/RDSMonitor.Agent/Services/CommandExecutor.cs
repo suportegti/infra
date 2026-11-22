@@ -76,7 +76,7 @@ public class CommandExecutor
             return tipo switch
             {
                 "disconnect"  => _sim.Disconnect(alvo),
-                "logoff"      => _sim.Logoff(alvo),
+                "logoff"      => _sim.Logoff(alvo, SomenteDesconectada(p), p.GetValueOrDefault("Usuario")),
                 "sendmessage" => _sim.SendMessage(alvo, p.GetValueOrDefault("Message")),
                 _             => null,
             };
@@ -101,9 +101,28 @@ public class CommandExecutor
         if (!p.TryGetValue("SessionId", out var sessionId))
             return Erro("SessionId não informado.");
 
+        // Logoff em lote das desconectadas: confere de novo, na hora, que a sessão continua
+        // desconectada e com o mesmo usuário (ele pode ter reconectado depois do clique).
+        if (SomenteDesconectada(p) && int.TryParse(sessionId, out var id))
+        {
+            var atual = WtsSessionApi.ListarSessoesComUsuario().FirstOrDefault(s => s.SessionId == id);
+            if (atual is null)
+                return Erro($"A sessão {id} não existe mais. Nada foi feito.");
+            if (p.TryGetValue("Usuario", out var esperado) && !string.IsNullOrWhiteSpace(esperado)
+                && !string.Equals(atual.Usuario, esperado, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals($"{atual.Dominio}\\{atual.Usuario}", esperado, StringComparison.OrdinalIgnoreCase))
+                return Erro($"A sessão {id} agora é de {atual.Usuario}, não de {esperado}. Nada foi feito.");
+            if (atual.Estado != WtsSessionApi.EstadoWts.Disconnected)
+                return Erro($"{atual.Usuario} reconectou na sessão {id} (estado: {atual.Estado}). O logoff foi cancelado para não fechar o trabalho em uso.");
+        }
+
         // logoff <ID> — encerra a sessão e salva o perfil do usuário
         return await RunCmdAsync("logoff", sessionId);
     }
+
+    /// <summary>Parâmetro enviado pelo logoff em lote da tela Sessões.</summary>
+    private static bool SomenteDesconectada(Dictionary<string, string> p) =>
+        p.TryGetValue("SomenteDesconectada", out var v) && bool.TryParse(v, out var b) && b;
 
     // ── Disconnect ────────────────────────────────────────────────────────────
 

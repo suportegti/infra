@@ -79,13 +79,13 @@
     <table class="data-table audit-table">
         <thead>
             <tr>
-                <ThOrdenavel Titulo="Data/hora" Campo="data"      Ordem="ordem" ComecaDecrescente />
-                <ThOrdenavel Titulo="Operador"  Campo="operador"  Ordem="ordem" />
-                <ThOrdenavel Titulo="Ação"      Campo="acao"      Ordem="ordem" />
-                <ThOrdenavel Titulo="Servidor"  Campo="servidor"  Ordem="ordem" />
-                <ThOrdenavel Titulo="Alvo"      Campo="alvo"      Ordem="ordem" />
-                <ThOrdenavel Titulo="Detalhes"  Campo="detalhes"  Ordem="ordem" />
-                <ThOrdenavel Titulo="Resultado" Campo="resultado" Ordem="ordem" />
+                <ThOrdenavel Titulo="Data/hora" Campo="data"      Ordem="ordem" ComecaDecrescente OnAlterada="Reordenar" />
+                <ThOrdenavel Titulo="Operador"  Campo="operador"  Ordem="ordem" OnAlterada="Reordenar" />
+                <ThOrdenavel Titulo="Ação"      Campo="acao"      Ordem="ordem" OnAlterada="Reordenar" />
+                <ThOrdenavel Titulo="Servidor"  Campo="servidor"  Ordem="ordem" OnAlterada="Reordenar" />
+                <ThOrdenavel Titulo="Alvo"      Campo="alvo"      Ordem="ordem" OnAlterada="Reordenar" />
+                <ThOrdenavel Titulo="Detalhes"  Campo="detalhes"  Ordem="ordem" OnAlterada="Reordenar" />
+                <ThOrdenavel Titulo="Resultado" Campo="resultado" Ordem="ordem" OnAlterada="Reordenar" />
             </tr>
         </thead>
         <tbody>
@@ -131,57 +131,16 @@ else if (!carregando)
     <p class="dash-note">Nenhuma ação registrada com esses filtros.</p>
 }
 
-<details class="form-card audit-acessos" open="@acessosAberto">
-    <summary @onclick="() => acessosAberto = !acessosAberto" @onclick:preventDefault>
-        <span><i class="fa-solid fa-right-to-bracket"></i> Tentativas de acesso (login) no período</span>
-        <i class="fa-solid fa-chevron-down chevron"></i>
-    </summary>
-    <div class="form-body">
-        <p class="search-summary" role="status">
-            <span><strong>@acessos.Count</strong> tentativa(s)@(acessosTruncado ? " — exibindo as mais recentes" : "").
-            @if (falhasRecentes > 0) { <text>@falhasRecentes falha(s).</text> }</span>
-        </p>
-        @if (acessos.Count > 0)
-        {
-            <table class="data-table audit-table">
-                <thead>
-                    <tr>
-                        <ThOrdenavel Titulo="Data/hora"   Campo="data"      Ordem="ordemAcessos" ComecaDecrescente />
-                        <ThOrdenavel Titulo="Usuário"     Campo="usuario"   Ordem="ordemAcessos" />
-                        <ThOrdenavel Titulo="Origem (IP)" Campo="ip"        Ordem="ordemAcessos" />
-                        <ThOrdenavel Titulo="Resultado"   Campo="resultado" Ordem="ordemAcessos" />
-                        <ThOrdenavel Titulo="Detalhe"     Campo="detalhe"   Ordem="ordemAcessos" />
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var a in ordemAcessos.Aplicar(acessos, AuditoriaOrdenacao.Acessos))
-                    {
-                        <tr>
-                            <td class="mono">@Horario.Fmt(a.DataHora, "dd/MM/yyyy HH:mm:ss")</td>
-                            <td>@a.Usuario</td>
-                            <td class="mono">@(a.Ip ?? "—")</td>
-                            <td>
-                                <span class="status-dot @AcessoCss(a.Resultado)"></span>
-                                @NomeAcesso(a.Resultado)
-                            </td>
-                            <td class="audit-detalhes" title="@a.Detalhe">@(a.Detalhe ?? "—")</td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
-        }
-        else
-        {
-            <p class="dash-note">Nenhuma tentativa de acesso registrada no período.</p>
-        }
-    </div>
-</details>
+<p class="dash-note">
+    <i class="fa-solid fa-right-to-bracket"></i>
+    Logins no portal (senhas erradas, bloqueios, saídas) ficam em
+    <a href="tentativas-acesso">Tentativas de acesso</a>.
+</p>
 
 @code {
     private readonly FiltroAuditoria filtro = new();
     private readonly PeriodoFiltro periodo = new("1h");
     private readonly Ordenacao ordem        = new("data", desc: true);
-    private readonly Ordenacao ordemAcessos = new("data", desc: true);
     private string  acaoTexto   = string.Empty;
     private string  statusTexto = string.Empty;
 
@@ -192,10 +151,6 @@ else if (!carregando)
     private List<string> operadores = new();
     private List<string> servidores = new();
 
-    private List<AcessoLog> acessos = new();
-    private bool acessosTruncado;
-    private bool acessosAberto;
-    private int  falhasRecentes;
 
     protected override async Task OnInitializedAsync()
     {
@@ -216,14 +171,11 @@ else if (!carregando)
         carregando = true;
         StateHasChanged();
         (itens, truncado) = await AuditoriaService.PesquisarAsync(filtro);
-        (acessos, acessosTruncado) = await AuditoriaService.PesquisarAcessosAsync(periodo.DeLocal, periodo.AteLocal);
-        falhasRecentes = acessos.Count(a => a.Resultado != AcessoResultado.Sucesso);
         carregando = false;
     }
 
-    private static string NomeAcesso(AcessoResultado r) => AcessoLog.Descrever(r);
-
-    private static string AcessoCss(AcessoResultado r) => AcessoLog.Css(r);
+    /// <summary>Só re-renderiza: a ordenação é aplicada na própria tabela.</summary>
+    private void Reordenar() { }
 
     private async Task LimparAsync()
     {

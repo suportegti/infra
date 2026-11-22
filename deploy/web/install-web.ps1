@@ -145,12 +145,19 @@ Ok "arquivos copiados."
 Passo 3 "Gravando appsettings.Production.json..."
 
 $chaveAnterior = $null
+$httpsAnterior = $null   # endpoint HTTPS do configurar-https.ps1 (preservado na atualizacao)
+$opcoesHttps   = $null
 if (Test-Path $ProdSettings) {
     try {
         $atual = Get-Content $ProdSettings -Raw | ConvertFrom-Json
         if ($atual.PSObject.Properties['AgentSettings'] -and $atual.AgentSettings.PSObject.Properties['ApiKey']) {
             $chaveAnterior = $atual.AgentSettings.ApiKey
         }
+        if ($atual.PSObject.Properties['Kestrel'] -and $atual.Kestrel.PSObject.Properties['Endpoints'] -and
+            $atual.Kestrel.Endpoints.PSObject.Properties['Https']) {
+            $httpsAnterior = $atual.Kestrel.Endpoints.Https
+        }
+        if ($atual.PSObject.Properties['Https']) { $opcoesHttps = $atual.Https }
     }
     catch { Aviso "appsettings.Production.json atual nao pode ser lido; sera recriado." }
 }
@@ -184,7 +191,12 @@ $config = [ordered]@{
         }
     }
 }
-$config | ConvertTo-Json -Depth 6 | Set-Content -Path $ProdSettings -Encoding UTF8
+if ($httpsAnterior) {
+    $config.Kestrel.Endpoints["Https"] = $httpsAnterior
+    if ($opcoesHttps) { $config["Https"] = $opcoesHttps }
+    Ok "configuracao HTTPS existente preservada ($($httpsAnterior.Url))."
+}
+$config | ConvertTo-Json -Depth 8 | Set-Content -Path $ProdSettings -Encoding UTF8
 
 # A pasta guarda o banco e a chave da API: acesso somente Administradores e SYSTEM
 & icacls.exe $InstallDir /inheritance:r /grant:r "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" | Out-Null

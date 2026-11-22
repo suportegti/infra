@@ -4,6 +4,7 @@
 @inject IPerfilService PerfilService
 @inject PresencaService Presenca
 @inject IConfiguracaoService Configuracao
+@inject IAvisoNovoUsuarioService AvisoNovoUsuario
 
 <PageTitle>Usuários do Sistema · RDSManager</PageTitle>
 
@@ -14,7 +15,21 @@
 
 @if (Sucesso == "criado")
 {
-    <div class="login-alert login-alert-success" role="alert">Usuário criado com sucesso.</div>
+    @if (EmailStatus == "falhou-senha")
+    {
+        <div class="login-alert" role="alert">
+            Usuário <strong>@UsuarioCriado</strong> criado, mas o e-mail com a senha temporária <strong>não foi enviado</strong>.
+            Edite o usuário e defina uma senha (com "Exigir troca" marcado), ou confira <a href="emails-enviados">E-mails enviados</a> para ver o motivo.
+        </div>
+    }
+    else
+    {
+        <div class="login-alert login-alert-success" role="alert">
+            Usuário criado com sucesso.
+            @if (EmailStatus == "enviado") { <span>E-mail de boas-vindas enviado.</span> }
+            else if (EmailStatus == "falhou") { <span>O e-mail de boas-vindas não foi enviado — veja o motivo em <a href="emails-enviados">E-mails enviados</a>.</span> }
+        </div>
+    }
 }
 else if (Sucesso == "editado")
 {
@@ -52,6 +67,14 @@ else if (Erro == "email-m365")
 {
     <div class="login-alert" role="alert">Contas Microsoft 365 precisam de um e-mail válido (é o login da pessoa na Microsoft).</div>
 }
+else if (Erro == "email-senha-gerada")
+{
+    <div class="login-alert" role="alert">Para gerar a senha temporária e enviá-la por e-mail, informe o e-mail do usuário.</div>
+}
+else if (Erro == "email-desligado")
+{
+    <div class="login-alert" role="alert">O envio de e-mail ao criar usuários está desligado ou não configurado (Configurações &gt; E-mail). Informe uma senha inicial.</div>
+}
 else if (Erro == "ultimo-admin")
 {
     <div class="login-alert" role="alert">Não é possível desabilitar o último administrador ativo do sistema.</div>
@@ -62,7 +85,7 @@ else if (Erro == "ultimo-admin")
         <span><i class="fa-solid fa-user-plus"></i> Novo usuário</span>
         <i class="fa-solid fa-chevron-down chevron"></i>
     </summary>
-    <form method="post" action="/api/usuarios/criar" class="form-usuario" data-tipo="Local">
+    <form method="post" action="/api/usuarios/criar" class="form-usuario" data-tipo="Local" data-gerar="@(avisoAtivo ? "1" : "0")">
         <div class="form-grid">
             <label class="field">
                 <i class="fa-solid fa-user"></i>
@@ -92,13 +115,17 @@ else if (Erro == "ultimo-admin")
                     <option value="Microsoft365">Microsoft 365 (conta da empresa, pelo e-mail)</option>
                 </select>
             </label>
-            <label class="field field-senha so-local">
+            <label class="field field-senha so-local so-senha-manual">
                 <i class="fa-solid fa-key"></i>
                 <input name="senhaInicial" type="password" placeholder="Senha inicial (mín. 8 caracteres)" minlength="8" />
                 <button type="button" class="olho-senha" tabindex="-1" aria-label="Mostrar senha (mantenha pressionado)" title="Mantenha pressionado para ver a senha"><i class="fa-solid fa-eye"></i></button>
             </label>
         </div>
         <div class="so-local form-checks">
+            <label class="toolbar-check" title="@(avisoAtivo ? "O portal cria uma senha temporária e envia por e-mail com o link do portal; a troca é obrigatória no primeiro acesso." : "Configure o envio de e-mail em Configurações > E-mail para usar esta opção.")">
+                <input type="checkbox" name="gerarSenha" value="true" class="gerar-senha" checked="@avisoAtivo" disabled="@(!avisoAtivo)" />
+                Gerar senha temporária e enviar por e-mail
+            </label>
             <label class="toolbar-check">
                 <input type="checkbox" name="exigirTroca" value="true" checked />
                 Exigir troca de senha no primeiro login
@@ -264,6 +291,10 @@ else if (Erro == "ultimo-admin")
     private List<AppUser> ListaUsuarios { get; set; } = new();
     private List<UsuarioOnline> Online { get; set; } = new();
     private int validadeDias = 90;
+    private bool avisoAtivo;
+
+    [SupplyParameterFromQuery(Name = "email")] private string? EmailStatus { get; set; }
+    [SupplyParameterFromQuery(Name = "u")]     private string? UsuarioCriado { get; set; }
     private List<RDSMonitor.Web.Data.Entities.Perfil> Perfis { get; set; } = new();
 
     private static bool Bloqueado(AppUser u) => u.LockoutEnd is { } fim && fim > DateTime.UtcNow;
@@ -274,5 +305,6 @@ else if (Erro == "ultimo-admin")
         Online        = Presenca.Online();
         validadeDias  = (await Configuracao.PoliticaSenhaAsync()).ValidadeDias;
         Perfis        = await PerfilService.ListarParaSelecaoAsync();
+        avisoAtivo    = await AvisoNovoUsuario.AtivoAsync();
     }
 }

@@ -37,7 +37,8 @@
 @* ── E-mail ─────────────────────────────────────────────── *@
 <section class="form-panel config-secao">
     <h2 class="relatorio-titulo"><i class="fa-solid fa-envelope"></i> Envio de e-mail</h2>
-    <p class="dash-note">Usado no <strong>"Esqueci minha senha"</strong> (envio da senha temporária).</p>
+    <p class="dash-note">Usado no <strong>"Esqueci minha senha"</strong> (senha temporária) e no aviso ao <strong>criar um usuário</strong>.
+        Todos os envios ficam em <a href="emails-enviados">E-mails enviados</a>.</p>
     <div class="form-grid audit-grid">
         <label class="field-label">
             <span>Enviar por</span>
@@ -55,7 +56,15 @@
             <span>Nome do remetente</span>
             <input @bind="nomeRemetente" placeholder="RDSManager" />
         </label>
+        <label class="field-label">
+            <span>Endereço do portal (links dos e-mails)</span>
+            <input type="url" @bind="enderecoPortal" placeholder="@Nav.BaseUri.TrimEnd('/')" />
+        </label>
     </div>
+    <label class="toolbar-check">
+        <input type="checkbox" @bind="avisarNovoUsuario" />
+        Enviar e-mail ao criar um usuário (link do portal, login e senha temporária; contas Microsoft 365 recebem só o aviso para entrar pelo botão da Microsoft)
+    </label>
 
     @if (metodo == MetodoEmail.Smtp)
     {
@@ -183,6 +192,8 @@
     private string? remetente, nomeRemetente, smtpServidor, smtpUsuario, smtpSenhaNova, emailTeste;
     private int smtpPorta = 587;
     private bool smtpSsl = true, smtpTemSenha;
+    private string? enderecoPortal;
+    private bool avisarNovoUsuario = true;
 
     // Microsoft 365
     private ConfigM365? m365;
@@ -206,6 +217,7 @@
         var e = await Configuracao.EmailAsync();
         (metodo, remetente, nomeRemetente) = (e.Metodo, e.Remetente, e.NomeRemetente);
         (smtpServidor, smtpPorta, smtpSsl, smtpUsuario, smtpTemSenha) = (e.SmtpServidor, e.SmtpPorta, e.SmtpSsl, e.SmtpUsuario, e.SmtpTemSenha);
+        (enderecoPortal, avisarNovoUsuario) = (e.EnderecoPortal, e.AvisarNovoUsuario);
         smtpSenhaNova = null;
 
         m365 = await Configuracao.M365Async();
@@ -222,7 +234,8 @@
     private async Task SalvarEmailAsync() => await Executar(async () =>
     {
         await Configuracao.SalvarEmailAsync(
-            new ConfigEmail(metodo, remetente, nomeRemetente, smtpServidor, smtpPorta, smtpSsl, smtpUsuario, smtpTemSenha),
+            new ConfigEmail(metodo, remetente, nomeRemetente, smtpServidor, smtpPorta, smtpSsl, smtpUsuario, smtpTemSenha,
+                enderecoPortal, avisarNovoUsuario),
             smtpSenhaNova, Login);
         return "Configuração de e-mail salva.";
     });
@@ -232,7 +245,8 @@
         await SalvarEmailAsync();
         if (erro) return mensagem!;
         await Email.EnviarAsync(emailTeste!.Trim(), "RDSManager — e-mail de teste",
-            $"<p>Este é um e-mail de teste do <strong>RDSManager</strong>, enviado em {Horario.Fmt(DateTime.UtcNow, "dd/MM/yyyy HH:mm")} por {System.Net.WebUtility.HtmlEncode(Login)}.</p>");
+            $"<p>Este é um e-mail de teste do <strong>RDSManager</strong>, enviado em {Horario.Fmt(DateTime.UtcNow, "dd/MM/yyyy HH:mm")} por {System.Net.WebUtility.HtmlEncode(Login)}.</p>",
+            new ContextoEmail(OrigemEmail.Teste, DisparadoPor: Login));
         return $"E-mail de teste enviado para {emailTeste}. Confira a caixa de entrada (e o lixo eletrônico).";
     });
 

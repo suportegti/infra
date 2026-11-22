@@ -113,24 +113,11 @@
 }
 
 @{
-    var sessoes = ServidoresFiltrados()
-        .SelectMany(s => s.Sessions.OrderBy(x => x.Username).Select(sess => (sv: s, sess)))
-        .Where(x => estadoSelecionado switch
-        {
-            "ativas"        => x.sess.State != SessionState.Disconnected,
-            "desconectadas" => x.sess.State == SessionState.Disconnected,
-            _               => true,
-        })
-        .ToList();
+    var sessoes = SessoesVisiveis();
+    var desconectadasNaLista = sessoes.Where(x => x.sess.State == SessionState.Disconnected).ToList();
+    var marcadasNaLista = desconectadasNaLista.Where(x => Marcada(x.sv, x.sess)).ToList();
 
-    // Pesquisa: usuário, máquina, IP ou servidor; com "Mostrar processos", também processo/PID.
-    if (BuscaAtiva)
-        sessoes = sessoes.Where(x => SessaoCasa(x.sv, x.sess)
-                                  || (PesquisaEmProcessos && ProcessosVisiveis(x.sv.Id, x.sess.RdsSessionId, filtrarPelaBusca: true).Count > 0)).ToList();
-
-    sessoes = ordem.Aplicar(sessoes, ColunasOrdenaveis).ToList();
-
-    var colunas = PodeAgirNaSessao ? 11 : 10;
+    var colunas = (PodeAgirNaSessao ? 11 : 10) + (podeLogoff ? 1 : 0);
 }
 
 @if (BuscaAtiva)
@@ -173,19 +160,54 @@ else if (sessoes.Count > 0)
 }
 else
 {
+    @if (podeLogoff && desconectadasNaLista.Count > 0)
+    {
+        <div class="lote-bar" role="region" aria-label="Logoff em lote das sessões desconectadas">
+            <span>
+                <i class="fa-solid fa-plug-circle-xmark"></i>
+                <strong>@desconectadasNaLista.Count</strong> desconectada(s) na lista ·
+                <strong>@marcadasNaLista.Count</strong> marcada(s)
+            </span>
+            <button type="button" class="btn-pill" @onclick="() => MarcarTodas(desconectadasNaLista)"
+                    disabled="@(marcadasNaLista.Count == desconectadasNaLista.Count)">
+                <i class="fa-regular fa-square-check"></i> Marcar todas as desconectadas
+            </button>
+            @if (marcadasNaLista.Count > 0)
+            {
+                <button type="button" class="btn-pill" @onclick="DesmarcarTodas">
+                    <i class="fa-regular fa-square"></i> Desmarcar
+                </button>
+            }
+            <button type="button" class="btn-pill danger" @onclick="() => LogoffMarcadasAsync(marcadasNaLista)"
+                    disabled="@(marcadasNaLista.Count == 0)">
+                <i class="fa-solid fa-right-from-bracket"></i> Fazer logoff das marcadas (@marcadasNaLista.Count)
+            </button>
+        </div>
+    }
+
     <table class="data-table">
         <thead>
             <tr>
+                @if (podeLogoff)
+                {
+                    <th class="col-check">
+                        <input type="checkbox" title="Marcar/desmarcar todas as sessões desconectadas da lista"
+                               aria-label="Marcar todas as sessões desconectadas"
+                               disabled="@(desconectadasNaLista.Count == 0)"
+                               checked="@(desconectadasNaLista.Count > 0 && marcadasNaLista.Count == desconectadasNaLista.Count)"
+                               @onchange="() => AlternarTodas(desconectadasNaLista, marcadasNaLista.Count)" />
+                    </th>
+                }
                 <th></th>
-                <ThOrdenavel Titulo="Servidor"   Campo="servidor"   Ordem="ordem" />
-                <ThOrdenavel Titulo="Usuário"    Campo="usuario"    Ordem="ordem" />
-                <ThOrdenavel Titulo="Sessão"     Campo="sessao"     Ordem="ordem" />
-                <ThOrdenavel Titulo="Origem"     Campo="origem"     Ordem="ordem" />
-                <ThOrdenavel Titulo="Estado"     Campo="estado"     Ordem="ordem" />
-                <ThOrdenavel Titulo="CPU"        Campo="cpu"        Ordem="ordem" ComecaDecrescente />
-                <ThOrdenavel Titulo="Memória"    Campo="memoria"    Ordem="ordem" ComecaDecrescente />
-                <ThOrdenavel Titulo="Login"      Campo="login"      Ordem="ordem" ComecaDecrescente />
-                <ThOrdenavel Titulo="Ociosidade" Campo="ociosidade" Ordem="ordem" ComecaDecrescente />
+                <ThOrdenavel Titulo="Servidor"   Campo="servidor"   Ordem="ordem" OnAlterada="Reordenar" />
+                <ThOrdenavel Titulo="Usuário"    Campo="usuario"    Ordem="ordem" OnAlterada="Reordenar" />
+                <ThOrdenavel Titulo="Sessão"     Campo="sessao"     Ordem="ordem" OnAlterada="Reordenar" />
+                <ThOrdenavel Titulo="Origem"     Campo="origem"     Ordem="ordem" OnAlterada="Reordenar" />
+                <ThOrdenavel Titulo="Estado"     Campo="estado"     Ordem="ordem" OnAlterada="Reordenar" />
+                <ThOrdenavel Titulo="CPU"        Campo="cpu"        Ordem="ordem" ComecaDecrescente OnAlterada="Reordenar" />
+                <ThOrdenavel Titulo="Memória"    Campo="memoria"    Ordem="ordem" ComecaDecrescente OnAlterada="Reordenar" />
+                <ThOrdenavel Titulo="Login"      Campo="login"      Ordem="ordem" ComecaDecrescente OnAlterada="Reordenar" />
+                <ThOrdenavel Titulo="Ociosidade" Campo="ociosidade" Ordem="ordem" ComecaDecrescente OnAlterada="Reordenar" />
                 @if (PodeAgirNaSessao) { <th>Ações</th> }
             </tr>
         </thead>
@@ -194,7 +216,18 @@ else
             {
                 var chave     = (sv.Id, sess.RdsSessionId);
                 var expandida = ExpandeAutomatico || expandidas.Contains(chave);
-                <tr class="@(expandida ? "row-expanded" : "")">
+                <tr class="@(expandida ? "row-expanded" : "") @(Marcada(sv, sess) ? "row-marcada" : "")">
+                    @if (podeLogoff)
+                    {
+                        <td class="col-check">
+                            @if (sess.State == SessionState.Disconnected)
+                            {
+                                <input type="checkbox" checked="@Marcada(sv, sess)" @onchange="() => AlternarMarca(sv, sess)"
+                                       aria-label="Marcar a sessão @sess.RdsSessionId de @sess.Username para logoff"
+                                       title="Marcar para o logoff em lote" />
+                            }
+                        </td>
+                    }
                     <td>
                         @if (!ExpandeAutomatico && podeVerProcessos)
                         {
@@ -682,6 +715,82 @@ else
         }
     }
 
+    // ── Logoff em lote das sessões desconectadas ──────────────
+    // Marca por (servidor, ID da sessão) guardando o usuário: o Windows reaproveita IDs,
+    // então uma marca só vale enquanto a sessão continuar desconectada e da mesma pessoa.
+    private readonly Dictionary<(int ServerId, int SessionId), string> marcadas = new();
+
+    private bool Marcada(Server sv, Session sess) =>
+        sess.State == SessionState.Disconnected
+        && marcadas.TryGetValue((sv.Id, sess.RdsSessionId), out var u)
+        && string.Equals(u, sess.Username, StringComparison.OrdinalIgnoreCase);
+
+    private void AlternarMarca(Server sv, Session sess)
+    {
+        var chave = (sv.Id, sess.RdsSessionId);
+        if (Marcada(sv, sess)) marcadas.Remove(chave);
+        else marcadas[chave] = sess.Username;
+    }
+
+    private void MarcarTodas(List<(Server sv, Session sess)> desconectadas)
+    {
+        foreach (var (sv, sess) in desconectadas) marcadas[(sv.Id, sess.RdsSessionId)] = sess.Username;
+    }
+
+    private void DesmarcarTodas() => marcadas.Clear();
+
+    private void AlternarTodas(List<(Server sv, Session sess)> desconectadas, int jaMarcadas)
+    {
+        if (jaMarcadas == desconectadas.Count) DesmarcarTodas();
+        else MarcarTodas(desconectadas);
+    }
+
+    private async Task LogoffMarcadasAsync(List<(Server sv, Session sess)> alvos)
+    {
+        if (alvos.Count == 0) return;
+
+        var porServidor = string.Join(", ", alvos.GroupBy(x => x.sv.Name).OrderBy(g => g.Key).Select(g => $"{g.Key} ({g.Count()})"));
+        var nomes = alvos.Select(x => x.sess.Username).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(n => n).ToList();
+        var usuarios = string.Join(", ", nomes.Take(15)) + (nomes.Count > 15 ? $" e mais {nomes.Count - 15}" : "");
+
+        var ok = await confirmacao.PerguntarAsync(
+            $"Fazer logoff de {alvos.Count} sessão(ões) desconectada(s)?",
+            "As sessões marcadas serão encerradas e os programas que ficaram abertos serão fechados; trabalho não salvo será perdido. " +
+            "Se alguém reconectar antes de o agente executar, a sessão dessa pessoa é preservada.",
+            $"Fazer logoff ({alvos.Count})",
+            perigo: true,
+            detalhes: new[] { ("Sessões", alvos.Count.ToString()), ("Servidores", porServidor), ("Usuários", usuarios) });
+        if (!ok) return;
+
+        int enviados = 0, falhas = 0;
+        foreach (var (sv, sess) in alvos)
+        {
+            var cmd = await CriarComandoAsync(sv.Id, CommandType.Logoff, new Dictionary<string, string>
+            {
+                { "SessionId",           sess.RdsSessionId.ToString() },
+                { "Usuario",             sess.Username },
+                { "SomenteDesconectada", "true" },
+            });
+            if (cmd is null)
+            {
+                falhas++;
+                if (!podeLogoff) break;   // perdeu a permissão no meio: para aqui
+                continue;
+            }
+            enviados++;
+            marcadas.Remove((sv.Id, sess.RdsSessionId));
+        }
+
+        if (falhas == 0)
+            Avisar($"Logoff enviado para {enviados} sessão(ões) desconectada(s) em {porServidor}. Os agentes executam em alguns segundos; cada logoff fica na Auditoria.", erro: false);
+        else
+            Avisar($"Logoff enviado para {enviados} de {alvos.Count} sessão(ões); {falhas} não foram enviadas.", erro: true);
+        AtualizarEmBreve();
+    }
+
+    /// <summary>Só re-renderiza: a ordenação é aplicada ao montar a tabela.</summary>
+    private void Reordenar() { }
+
     // ── Logoff / Disconnect ───────────────────────────────────
 
     private async Task LogoffAsync(Server sv, Session sess)
@@ -759,6 +868,28 @@ else
     }
 
     // ── Helpers ───────────────────────────────────────────────
+
+    /// <summary>Sessões da tabela, com os filtros, a pesquisa e a ordenação atuais.</summary>
+    private List<(Server sv, Session sess)> SessoesVisiveis()
+    {
+        var sessoes = ServidoresFiltrados()
+            .SelectMany(s => s.Sessions.OrderBy(x => x.Username).Select(sess => (sv: s, sess)))
+            .Where(x => estadoSelecionado switch
+            {
+                "ativas"        => x.sess.State != SessionState.Disconnected,
+                "desconectadas" => x.sess.State == SessionState.Disconnected,
+                _               => true,
+            })
+            .ToList();
+
+        // Pesquisa: usuário, máquina, IP ou servidor; com "Mostrar processos", também processo/PID.
+        if (BuscaAtiva)
+            sessoes = sessoes.Where(x => SessaoCasa(x.sv, x.sess)
+                                      || (PesquisaEmProcessos && ProcessosVisiveis(x.sv.Id, x.sess.RdsSessionId, filtrarPelaBusca: true).Count > 0)).ToList();
+
+        sessoes = ordem.Aplicar(sessoes, ColunasOrdenaveis).ToList();
+        return sessoes;
+    }
 
     /// <summary>Enfileira o comando; o serviço confere a permissão e grava a auditoria.</summary>
     private async Task<Command?> CriarComandoAsync(int serverId, CommandType tipo, Dictionary<string, string> parametros)

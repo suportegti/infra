@@ -184,6 +184,26 @@ O resultado da pesquisa pode ser exportado para **Excel** (.xlsx) ou **CSV**. A 
 Relatórios tem o mesmo filtro de período (data e hora) e também exporta para Excel.
 O registro fica guardado mesmo que o servidor seja excluído depois.
 
+Com a mesma permissão há duas telas complementares:
+
+- **Tentativas de acesso**: logins no portal (com sucesso ou não), saídas, trocas e
+  recuperações de senha, com usuário e IP. Filtros por período, usuário, IP e resultado
+  (inclusive "somente falhas"), colunas ordenáveis e exportação.
+- **E-mails enviados**: cada e-mail que o portal tentou enviar, com a funcionalidade que
+  disparou e o resultado (ver `AUTENTICACAO.md`).
+
+### Logoff em lote das sessões desconectadas
+
+Em **Sessões**, quem tem a permissão de logoff vê uma caixa de seleção nas sessões
+**desconectadas** e a barra *"Marcar todas as desconectadas / Fazer logoff das marcadas"*.
+Uma confirmação mostra quantas sessões, em quais servidores e de quais usuários; cada
+sessão vira um comando de logoff próprio, registrado na Auditoria.
+
+Se o usuário **reconectar** antes de o agente executar, o agente confere de novo, na
+hora, que a sessão continua desconectada e com o mesmo usuário, e **cancela** o logoff
+daquela sessão (o motivo aparece na Auditoria). Essa conferência existe a partir do agente
+desta versão; agentes anteriores executam o logoff sem conferir.
+
 ---
 
 ## 5. Instalar o agente em cada servidor RDS
@@ -355,6 +375,19 @@ mesma exista ou não a conta.
 > backup. Na primeira subida da 1.8.0 os usuários precisam entrar de novo (os
 > cookies antigos deixam de valer).
 
+## 7.2 HTTPS na rede interna
+
+Para usar o login com Microsoft 365 é preciso HTTPS. Em portais acessados só pela rede
+interna (por IP ou nome interno), rode no servidor do portal:
+
+```powershell
+.\configurar-https.ps1 -Enderecos 192.168.153.16
+```
+
+Depois, instale o `C:\RDSMonitor\Web\certificados\RDSManager-CA.cer` como Autoridade de
+Certificação Raiz Confiável nas estações (GPO). Os agentes continuam em HTTP. Guia
+completo: [`HTTPS.md`](HTTPS.md).
+
 ## 8. Desinstalar
 
 ```powershell
@@ -432,6 +465,9 @@ repositório. Os parâmetros (5 tentativas, 15 min, 10/min) estão em
 | Login com Microsoft 365 não aparece | Habilite em **Configurações > Microsoft 365** (Tenant, aplicativo e chave preenchidos). O portal precisa estar em HTTPS |
 | *Não há usuário do RDSManager com esse e-mail* | O usuário precisa estar cadastrado como **Microsoft 365** com o mesmo e-mail da conta da empresa |
 | "Esqueci minha senha" não chega | Configure **Configurações > E-mail** e use **Enviar e-mail de teste**. O usuário precisa ser local, ativo e ter e-mail cadastrado. Tentativas aparecem em Auditoria > Tentativas de acesso |
+| Tema claro volta para o escuro ao trocar de menu | Corrigido nesta versão. Se persistir, limpe o cache do navegador (Ctrl+F5) |
+| Usuário novo não recebeu o e-mail | Veja **E-mails enviados**: o motivo da falha aparece na linha. Confira também Configurações > E-mail (*Enviar e-mail ao criar um usuário* e *Endereço do portal*) |
+| Navegador alerta sobre o certificado (HTTPS) | A CA interna não está instalada na estação, ou o endereço usado não está no certificado. Ver `HTTPS.md` |
 | Portal não abre | `Get-Service RDSMonitor.Web` e `Get-EventLog Application -Source RDSMonitor.Web -Newest 20` |
 | Esqueci a senha do admin | No servidor do portal: `cd C:\RDSMonitor\Web; .\RDSMonitor.Web.exe --reset-senha-admin="NovaSenha#1"` (também remove o bloqueio por tentativas) |
 | Admin bloqueado por tentativas | Outro administrador clica **Desbloquear** em Usuários do sistema; ou, no servidor: `cd C:\RDSMonitor\Web; .\RDSMonitor.Web.exe --desbloquear-admin` (não altera a senha). O bloqueio também expira sozinho em 15 min |

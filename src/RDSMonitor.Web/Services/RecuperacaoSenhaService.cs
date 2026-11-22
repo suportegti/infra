@@ -85,7 +85,8 @@ public class RecuperacaoSenhaService : IRecuperacaoSenhaService
                   <p style="color:#6b7280;font-size:12px">Se não foi você, ignore este e-mail: sua senha atual continua valendo.</p>
                 </div>
                 """;
-            await _email.EnviarAsync(user.Email!, "RDSManager — senha temporária", html);
+            await _email.EnviarAsync(user.Email!, "RDSManager — senha temporária", html,
+                new ContextoEmail(OrigemEmail.RecuperacaoSenha, user.Username, "(próprio usuário — Esqueci minha senha)", ip));
             await _autenticacao.RegistrarEventoAsync(user.Username, ip, AcessoResultado.RecuperacaoSolicitada, $"enviada para {Mascarar(user.Email!)}");
         }
         catch (Exception ex)
@@ -100,7 +101,7 @@ public class RecuperacaoSenhaService : IRecuperacaoSenhaService
     }
 
     /// <summary>12 caracteres sem os ambíguos (0/O, 1/l/I), com letra maiúscula, minúscula, número e símbolo.</summary>
-    private static string GerarSenhaTemporaria()
+    public static string GerarSenhaTemporaria()
     {
         const string mai = "ABCDEFGHJKLMNPQRSTUVWXYZ", min = "abcdefghijkmnpqrstuvwxyz", num = "23456789", sim = "@#$%&*+?";
         var todos = mai + min + num + sim;

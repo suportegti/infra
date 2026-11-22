@@ -87,9 +87,10 @@ Microsoft 365**. As alterações valem na hora, sem reiniciar o serviço.
 ### Requisito: HTTPS
 
 A Microsoft só devolve o login para endereços **https** (a única exceção é
-`http://localhost`, útil para testar na própria máquina). Antes de habilitar o
-botão no ambiente real, publique o portal com certificado (IIS/proxy reverso ou
-`Kestrel:Endpoints` com certificado) e cadastre essa URI no aplicativo do Entra.
+`http://localhost`, útil para testar na própria máquina). Para portais só da rede
+interna, o pacote traz o `configurar-https.ps1`, que cria uma CA interna e o
+certificado do portal para o IP/nome do servidor: veja **[HTTPS.md](HTTPS.md)**.
+Depois, cadastre no aplicativo do Entra a URI `https://<endereço>:5001/signin-oidc`.
 
 ---
 
@@ -125,6 +126,39 @@ botão no ambiente real, publique o portal com certificado (IIS/proxy reverso ou
 | **Microsoft 365** | Usa o aplicativo do Entra ID da seção 2 via Microsoft Graph (`sendMail`). Requer a permissão de aplicativo `Mail.Send` e um remetente que seja uma caixa do tenant |
 
 Use **Enviar e-mail de teste** antes de divulgar a função aos usuários.
+
+### E-mail ao criar um usuário
+
+Com o envio configurado e a opção **"Enviar e-mail ao criar um usuário"** ligada
+(Configurações > E-mail, ligada por padrão), o cadastro de um usuário com e-mail
+envia as boas-vindas:
+
+| Tipo de conta | Conteúdo do e-mail |
+|---|---|
+| **Local** com *"Gerar senha temporária e enviar por e-mail"* (marcada por padrão) | Link do portal, **usuário** e **senha temporária** gerada pelo portal. A troca é obrigatória no primeiro acesso |
+| **Local** com senha digitada pelo administrador | Link do portal e usuário; a senha é informada pelo administrador (não vai no e-mail) |
+| **Microsoft 365** | Link do portal e o aviso para entrar pelo botão **Entrar com Microsoft 365** com a conta da empresa |
+
+- O link usa o **Endereço do portal** de Configurações > E-mail (ex.:
+  `https://192.168.153.16:5001`); sem ele, usa o endereço pelo qual o administrador
+  está acessando.
+- Se o e-mail com a senha gerada falhar, o usuário é criado mesmo assim e a tela avisa
+  para definir a senha pela edição do usuário.
+
+### Monitoramento: E-mails enviados
+
+A tela **E-mails enviados** (menu, permissão *Auditoria*) lista todos os e-mails que
+o portal tentou enviar:
+
+- data/hora, **funcionalidade** que disparou (*Recuperação de senha*, *Novo usuário*,
+  *E-mail de teste*), destinatário, assunto, usuário relacionado, quem disparou (com IP),
+  método (SMTP ou Microsoft 365) e resultado, com o erro devolvido pelo servidor;
+- filtros por período, funcionalidade, resultado e texto; colunas ordenáveis;
+  exportação para Excel e CSV;
+- o **conteúdo não é guardado**, porque pode conter senhas temporárias.
+
+"Enviado" significa que o servidor de e-mail aceitou a mensagem. Se a pessoa não
+recebeu, confira o lixo eletrônico e o rastreamento de mensagens do servidor de e-mail.
 
 ---
 
@@ -162,3 +196,5 @@ Use **Enviar e-mail de teste** antes de divulgar a função aos usuários.
 | Redirecionamento para a Microsoft (client_id, redirect_uri, PKCE) | Testado localmente |
 | Login completo com uma conta real do Microsoft 365 | **Pendente**: depende do registro do aplicativo no tenant da empresa |
 | Envio de e-mail pelo Microsoft Graph | **Pendente**: depende do aplicativo com `Mail.Send` no tenant |
+| E-mail ao criar usuário e registro em E-mails enviados | Compilado; **teste de envio pendente** com o servidor de e-mail real |
+| HTTPS com CA interna (`configurar-https.ps1`) | Geração dos certificados (SAN com IP e nome, cadeia pela CA) e redirecionamento HTTP→HTTPS testados localmente; **execução do script no servidor pendente** |

@@ -48,6 +48,13 @@ foreach ($p in $pacotes) {
 
     Copy-Item (Join-Path $Raiz "$($p.Scripts)\*.ps1") $pasta
     if (Test-Path $Docs) { Copy-Item $Docs (Join-Path $pasta "IMPLANTACAO.md") }
+    # Portal: guias de HTTPS (configurar-https.ps1) e de autenticacao/e-mail
+    if ($p.Nome -eq "RDSMonitor.Web") {
+        foreach ($guia in @("HTTPS.md", "AUTENTICACAO.md")) {
+            $arq = Join-Path $Raiz "docs\$guia"
+            if (Test-Path $arq) { Copy-Item $arq (Join-Path $pasta $guia) }
+        }
+    }
 
     $zip = Join-Path $Dist "$($p.Nome)-$Versao.zip"
     Compress-Archive -Path (Join-Path $pasta "*") -DestinationPath $zip -Force

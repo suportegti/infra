@@ -102,6 +102,7 @@ builder.Services.AddScoped<IAtualizacaoAgenteService, AtualizacaoAgenteService>(
 builder.Services.AddScoped<IConfiguracaoService, ConfiguracaoService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<IRecuperacaoSenhaService, RecuperacaoSenhaService>();
+builder.Services.AddScoped<IAvisoNovoUsuarioService, AvisoNovoUsuarioService>();
 
 // Pacotes do agente para a atualização automática: ao lado do banco (data\pacotes-agente),
 // que o instalador do portal preserva nas atualizações.
@@ -150,6 +151,15 @@ builder.Services.AddHostedService<ServerHealthMonitor>();
 
 // Interatividade no servidor (SignalR): necessária para @onclick, @bind e
 // para os timers de atualização automática das telas de monitoramento.
+// HTTPS (opcional, configurado pelo deploy\web\configurar-https.ps1): a porta HTTPS vem de
+// "Https:Porta". Sem ela, nada é redirecionado e o portal segue só em HTTP.
+var portaHttps = builder.Configuration.GetValue<int?>("Https:Porta");
+builder.Services.AddHttpsRedirection(o =>
+{
+    o.HttpsPort = portaHttps;
+    o.RedirectStatusCode = StatusCodes.Status307TemporaryRedirect;
+});
+
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents(o =>
     {
@@ -178,7 +188,10 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
 }
 
-app.UseHttpsRedirection();
+// Navegador vai para HTTPS; a API dos agentes (/api/agent) continua aceitando HTTP, para os
+// agentes já instalados não precisarem confiar no certificado interno.
+if (portaHttps is not null && app.Configuration.GetValue("Https:RedirecionarNavegador", true))
+    app.UseWhen(ctx => !ctx.Request.Path.StartsWithSegments("/api/agent"), b => b.UseHttpsRedirection());
 app.UseStaticFiles();
 app.UseRateLimiter();
 app.UseAntiforgery();
@@ -327,6 +340,8 @@ app.MapPost("/api/auth/change-password", async (
 // ─────────────────────────────────────────────────────────────────────────────
 app.MapPost("/api/usuarios/criar", async (
         IUserService userService,
+        IAvisoNovoUsuarioService aviso,
+        HttpContext http,
         [FromForm] string username,
         [FromForm] string displayName,
         [FromForm] int perfilId,
@@ -334,16 +349,41 @@ app.MapPost("/api/usuarios/criar", async (
         [FromForm] string? email,
         [FromForm] string? tipoAutenticacao,
         [FromForm] string? senhaExpira,
-        [FromForm] string? exigirTroca) =>
+        [FromForm] string? exigirTroca,
+        [FromForm] string? gerarSenha) =>
     {
-        var dados = new DadosUsuario(displayName, perfilId, email,
-            tipoAutenticacao == "Microsoft365" ? TipoAutenticacao.Microsoft365 : TipoAutenticacao.Local,
+        var tipo = tipoAutenticacao == "Microsoft365" ? TipoAutenticacao.Microsoft365 : TipoAutenticacao.Local;
+
+        // "Gerar senha temporária e enviar por e-mail": o portal cria a senha e obriga a troca no 1º login
+        string? senhaGerada = null;
+        if (tipo == TipoAutenticacao.Local && gerarSenha == "true")
+        {
+            if (string.IsNullOrWhiteSpace(email)) return Results.Redirect("/usuarios?erro=email-senha-gerada");
+            if (!await aviso.AtivoAsync())        return Results.Redirect("/usuarios?erro=email-desligado");
+            senhaInicial = senhaGerada = RecuperacaoSenhaService.GerarSenhaTemporaria();
+            exigirTroca  = "true";
+        }
+
+        var dados = new DadosUsuario(displayName, perfilId, email, tipo,
             SenhaExpira: senhaExpira == "true", ExigirTroca: exigirTroca == "true");
         var resultado = await userService.CriarAsync(username, senhaInicial, dados);
 
+        if (resultado == UserOperationResult.Sucesso)
+        {
+            var operador = http.User.FindFirst("username")?.Value ?? http.User.Identity?.Name ?? "?";
+            var enviado = await aviso.EnviarAsync(username.Trim(), displayName.Trim(), email, tipo, senhaGerada,
+                $"{http.Request.Scheme}://{http.Request.Host}", operador, http.Connection.RemoteIpAddress?.ToString());
+            var status = enviado switch
+            {
+                ResultadoAviso.Enviado => "enviado",
+                ResultadoAviso.Falhou  => senhaGerada is null ? "falhou" : "falhou-senha",
+                _                      => "nao",
+            };
+            return Results.Redirect($"/usuarios?sucesso=criado&email={status}&u={Uri.EscapeDataString(username.Trim())}");
+        }
+
         return resultado switch
         {
-            UserOperationResult.Sucesso          => Results.Redirect("/usuarios?sucesso=criado"),
             UserOperationResult.UsuarioJaExiste  => Results.Redirect("/usuarios?erro=usuario-existe"),
             UserOperationResult.SenhaInvalida    => Results.Redirect("/usuarios?erro=senha-fraca"),
             UserOperationResult.EmailJaExiste    => Results.Redirect("/usuarios?erro=email-existe"),
@@ -451,6 +491,105 @@ app.MapGet("/api/auditoria/xlsx", async (IAuditoriaService auditoria, HttpReques
         });
         return Results.File(Xlsx.Gerar("Auditoria", colunas, linhas), Xlsx.ContentType,
             $"auditoria-{Horario.Agora:yyyyMMdd-HHmm}.xlsx");
+    })
+    .RequireAuthorization(Permissoes.AuditoriaVer);
+
+// GET /api/acessos/csv e /api/acessos/xlsx (tela Tentativas de acesso: mesmos filtros e ordem)
+static async Task<List<AcessoLog>> PesquisarAcessosAsync(IAuditoriaService auditoria, HttpRequest req)
+{
+    var q = req.Query;
+    string? resultado = q["resultado"];
+    var (itens, _) = await auditoria.PesquisarAcessosAsync(new FiltroAcessos
+    {
+        DeLocal   = DataLocal(q["de"]),
+        AteLocal  = DataLocal(q["ate"]),
+        Usuario   = q["usuario"], Ip = q["ip"],
+        SoFalhas  = resultado == "falhas",
+        Resultado = Enum.TryParse<AcessoResultado>(resultado, out var r) ? r : null,
+        Limite    = 20_000,
+    });
+    return Ordenacao.DaUrl(q["ordenar"], "data").Aplicar(itens, AuditoriaOrdenacao.Acessos).ToList();
+}
+
+app.MapGet("/api/acessos/csv", async (IAuditoriaService auditoria, HttpRequest req) =>
+    {
+        var itens = await PesquisarAcessosAsync(auditoria, req);
+        static string C(string? v) => "\"" + (v ?? "").Replace("\"", "\"\"") + "\"";
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("Data/hora;Usuario;Origem (IP);Resultado;Detalhe");
+        foreach (var a in itens)
+            sb.AppendLine(string.Join(";", C(Horario.Fmt(a.DataHora, "dd/MM/yyyy HH:mm:ss")), C(a.Usuario), C(a.Ip),
+                C(AcessoLog.Descrever(a.Resultado)), C(a.Detalhe)));
+        var bytes = System.Text.Encoding.UTF8.GetPreamble().Concat(System.Text.Encoding.UTF8.GetBytes(sb.ToString())).ToArray();
+        return Results.File(bytes, "text/csv; charset=utf-8", $"tentativas-acesso-{Horario.Agora:yyyyMMdd-HHmm}.csv");
+    })
+    .RequireAuthorization(Permissoes.AuditoriaVer);
+
+app.MapGet("/api/acessos/xlsx", async (IAuditoriaService auditoria, HttpRequest req) =>
+    {
+        var itens = await PesquisarAcessosAsync(auditoria, req);
+        var colunas = new XlsxColuna[]
+        {
+            new("Data/hora", XlsxTipo.DataHora, 20), new("Usuário", Largura: 24), new("Origem (IP)", Largura: 18),
+            new("Resultado", Largura: 26), new("Detalhe", Largura: 50),
+        };
+        var linhas = itens.Select(a => new object?[]
+        {
+            Horario.Br(a.DataHora), a.Usuario, a.Ip, AcessoLog.Descrever(a.Resultado), a.Detalhe,
+        });
+        return Results.File(Xlsx.Gerar("Tentativas de acesso", colunas, linhas), Xlsx.ContentType,
+            $"tentativas-acesso-{Horario.Agora:yyyyMMdd-HHmm}.xlsx");
+    })
+    .RequireAuthorization(Permissoes.AuditoriaVer);
+
+// GET /api/emails/csv e /api/emails/xlsx (tela E-mails enviados: mesmos filtros e ordem)
+static async Task<List<EmailEnviado>> PesquisarEmailsAsync(IEmailService emails, HttpRequest req)
+{
+    var q = req.Query;
+    var (itens, _) = await emails.PesquisarEnviadosAsync(new FiltroEmails
+    {
+        DeLocal  = DataLocal(q["de"]),
+        AteLocal = DataLocal(q["ate"]),
+        Origem   = Enum.TryParse<OrigemEmail>(q["origem"], out var o) ? o : null,
+        Sucesso  = q["resultado"].ToString() switch { "ok" => true, "falha" => false, _ => null },
+        Texto    = q["texto"],
+        Limite   = 20_000,
+    });
+    return Ordenacao.DaUrl(q["ordenar"], "data").Aplicar(itens, RDSMonitor.Web.Components.Pages.EmailsEnviados.ColunasEmail).ToList();
+}
+
+app.MapGet("/api/emails/csv", async (IEmailService emails, HttpRequest req) =>
+    {
+        var itens = await PesquisarEmailsAsync(emails, req);
+        static string C(string? v) => "\"" + (v ?? "").Replace("\"", "\"\"") + "\"";
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("Data/hora;Funcionalidade;Destinatario;Assunto;Usuario;Disparado por;IP;Metodo;Resultado;Erro");
+        foreach (var e in itens)
+            sb.AppendLine(string.Join(";", C(Horario.Fmt(e.DataHora, "dd/MM/yyyy HH:mm:ss")), C(EmailEnviado.Descrever(e.Origem)),
+                C(e.Para), C(e.Assunto), C(e.UsuarioRelacionado), C(e.DisparadoPor), C(e.Ip),
+                C(RDSMonitor.Web.Components.Pages.EmailsEnviados.NomeMetodo(e.Metodo)), C(e.Sucesso ? "Enviado" : "Falhou"), C(e.Erro)));
+        var bytes = System.Text.Encoding.UTF8.GetPreamble().Concat(System.Text.Encoding.UTF8.GetBytes(sb.ToString())).ToArray();
+        return Results.File(bytes, "text/csv; charset=utf-8", $"emails-enviados-{Horario.Agora:yyyyMMdd-HHmm}.csv");
+    })
+    .RequireAuthorization(Permissoes.AuditoriaVer);
+
+app.MapGet("/api/emails/xlsx", async (IEmailService emails, HttpRequest req) =>
+    {
+        var itens = await PesquisarEmailsAsync(emails, req);
+        var colunas = new XlsxColuna[]
+        {
+            new("Data/hora", XlsxTipo.DataHora, 20), new("Funcionalidade", Largura: 22), new("Destinatário", Largura: 30),
+            new("Assunto", Largura: 36), new("Usuário", Largura: 18), new("Disparado por", Largura: 24),
+            new("IP", Largura: 16), new("Método", Largura: 14), new("Resultado", Largura: 12), new("Erro", Largura: 60),
+        };
+        var linhas = itens.Select(e => new object?[]
+        {
+            Horario.Br(e.DataHora), EmailEnviado.Descrever(e.Origem), e.Para, e.Assunto, e.UsuarioRelacionado,
+            e.DisparadoPor, e.Ip, RDSMonitor.Web.Components.Pages.EmailsEnviados.NomeMetodo(e.Metodo),
+            e.Sucesso ? "Enviado" : "Falhou", e.Erro,
+        });
+        return Results.File(Xlsx.Gerar("E-mails enviados", colunas, linhas), Xlsx.ContentType,
+            $"emails-enviados-{Horario.Agora:yyyyMMdd-HHmm}.xlsx");
     })
     .RequireAuthorization(Permissoes.AuditoriaVer);
 

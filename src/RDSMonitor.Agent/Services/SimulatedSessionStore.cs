@@ -141,12 +141,19 @@ public class SimulatedSessionStore
         }
     }
 
-    public CommandResult Logoff(int sessionId)
+    public CommandResult Logoff(int sessionId, bool somenteDesconectada = false, string? usuarioEsperado = null)
     {
         lock (_lock)
         {
             var s = _sessoes.FirstOrDefault(x => x.Id == sessionId);
             if (s is null) return Erro($"Sessão simulada {sessionId} não existe mais.");
+            if (somenteDesconectada)
+            {
+                if (!string.IsNullOrWhiteSpace(usuarioEsperado) && !string.Equals(s.Usuario, usuarioEsperado, StringComparison.OrdinalIgnoreCase))
+                    return Erro($"A sessão {sessionId} agora é de {s.Usuario}, não de {usuarioEsperado}. Nada foi feito.");
+                if (s.DesconectadaEm is null)
+                    return Erro($"{s.Usuario} reconectou na sessão {sessionId}. O logoff foi cancelado para não fechar o trabalho em uso.");
+            }
 
             _sessoes.Remove(s);
             Evento(s, 23, "Logoff", DateTime.UtcNow, null);

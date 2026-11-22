@@ -1666,3 +1666,16 @@ mark.hl {
     background: var(--bg); border: 1px solid var(--border); border-radius: 999px;
     padding: .35rem .8rem; color: var(--text); min-width: 220px;
 }
+
+/* Sessões: logoff em lote das desconectadas */
+.lote-bar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem;
+    margin: 0 0 .75rem; padding: .6rem .9rem; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--surface);
+}
+.lote-bar > span { margin-right: auto; }
+.data-table .col-check { width: 2.25rem; text-align: center; }
+.data-table .col-check input { width: 1rem; height: 1rem; cursor: pointer; }
+.data-table tr.row-marcada > td { background: color-mix(in srgb, var(--status-alert) 10%, transparent); }
+
+.form-usuario[data-gerar="1"] .so-senha-manual { display: none; }

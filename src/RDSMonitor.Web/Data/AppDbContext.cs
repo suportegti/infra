@@ -18,6 +18,7 @@ public class AppDbContext : DbContext
     public DbSet<SessionEvent>   SessionEvents   => Set<SessionEvent>();
     public DbSet<AgentePacote>   AgentePacotes   => Set<AgentePacote>();
     public DbSet<Configuracao>   Configuracoes   => Set<Configuracao>();
+    public DbSet<EmailEnviado>   EmailsEnviados  => Set<EmailEnviado>();
     public DbSet<Command>        Commands        => Set<Command>();
     public DbSet<ServerProcess>  Processes       => Set<ServerProcess>();
 
@@ -99,6 +100,21 @@ public class AppDbContext : DbContext
             e.HasKey(c => c.Chave);
             e.Property(c => c.Chave).HasMaxLength(80);
             e.Property(c => c.AlteradoPor).HasMaxLength(100);
+        });
+
+        // ── EmailEnviado ─────────────────────────────────────
+        modelBuilder.Entity<EmailEnviado>(e =>
+        {
+            e.ToTable("EmailsEnviados");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Para).HasMaxLength(200).IsRequired();
+            e.Property(x => x.Assunto).HasMaxLength(300).IsRequired();
+            e.Property(x => x.Metodo).HasMaxLength(20);
+            e.Property(x => x.Erro).HasMaxLength(1000);
+            e.Property(x => x.UsuarioRelacionado).HasMaxLength(100);
+            e.Property(x => x.DisparadoPor).HasMaxLength(100);
+            e.Property(x => x.Ip).HasMaxLength(64);
+            e.HasIndex(x => x.DataHora);
         });
 
         // ── AgentePacote ─────────────────────────────────────

@@ -18,13 +18,30 @@ public sealed class FiltroAuditoria
     public int Limite          { get; set; } = 500;
 }
 
+/// <summary>Filtros da tela Tentativas de acesso. Datas em horário de Brasília.</summary>
+public sealed class FiltroAcessos
+{
+    public DateTime? DeLocal  { get; set; }
+    public DateTime? AteLocal { get; set; }
+    /// <summary>Login digitado (parte do texto, sem diferenciar maiúsculas).</summary>
+    public string? Usuario    { get; set; }
+    public string? Ip         { get; set; }
+    public AcessoResultado? Resultado { get; set; }
+    /// <summary>Só tentativas que não entraram (senha errada, bloqueio, limite etc.).</summary>
+    public bool SoFalhas      { get; set; }
+    public int Limite         { get; set; } = 1_000;
+}
+
 public interface IAuditoriaService
 {
     Task<(List<AuditoriaAcao> Itens, bool Truncado)> PesquisarAsync(FiltroAuditoria filtro);
     Task<List<string>> ListarOperadoresAsync();
 
-    /// <summary>Tentativas de login (sucesso e falha) no período, mais recentes primeiro.</summary>
-    Task<(List<AcessoLog> Itens, bool Truncado)> PesquisarAcessosAsync(DateTime? deLocal, DateTime? ateLocal, int limite = 200);
+    /// <summary>Tentativas de login (sucesso e falha) com os filtros, mais recentes primeiro.</summary>
+    Task<(List<AcessoLog> Itens, bool Truncado)> PesquisarAcessosAsync(FiltroAcessos filtro);
+
+    /// <summary>Logins que aparecem nas tentativas de acesso (sugestões do filtro).</summary>
+    Task<List<string>> ListarUsuariosAcessosAsync();
 }
 
 public class AuditoriaService : IAuditoriaService
@@ -80,19 +97,41 @@ public class AuditoriaService : IAuditoriaService
     public Task<List<string>> ListarOperadoresAsync() =>
         _db.Auditoria.AsNoTracking().Select(a => a.OperadorLogin).Distinct().OrderBy(x => x).ToListAsync();
 
-    public async Task<(List<AcessoLog>, bool)> PesquisarAcessosAsync(DateTime? deLocal, DateTime? ateLocal, int limite = 200)
+    public async Task<(List<AcessoLog>, bool)> PesquisarAcessosAsync(FiltroAcessos f)
     {
         IQueryable<AcessoLog> q = _db.AcessoLogs.AsNoTracking();
 
-        if (Utc(deLocal) is { } de)   q = q.Where(a => a.DataHora >= de);
-        if (Utc(ateLocal) is { } ate) q = q.Where(a => a.DataHora <= ate);
+        if (Utc(f.DeLocal) is { } de)   q = q.Where(a => a.DataHora >= de);
+        if (Utc(f.AteLocal) is { } ate) q = q.Where(a => a.DataHora <= ate);
+        if (!string.IsNullOrWhiteSpace(f.Usuario))
+        {
+            var u = f.Usuario.Trim().ToLower();
+            q = q.Where(a => a.Usuario.ToLower().Contains(u));
+        }
+        if (!string.IsNullOrWhiteSpace(f.Ip))
+        {
+            var ip = f.Ip.Trim();
+            q = q.Where(a => a.Ip != null && a.Ip.Contains(ip));
+        }
+        if (f.Resultado is { } r) q = q.Where(a => a.Resultado == r);
+        if (f.SoFalhas) q = q.Where(a => FalhasAcesso.Contains(a.Resultado));
 
-        limite = Math.Clamp(limite, 1, 5_000);
+        var limite = Math.Clamp(f.Limite, 1, 20_000);
         var itens = await q.OrderByDescending(a => a.DataHora).Take(limite + 1).ToListAsync();
         var truncado = itens.Count > limite;
         if (truncado) itens.RemoveAt(itens.Count - 1);
         return (itens, truncado);
     }
+
+    /// <summary>Resultados que significam "não entrou" (ataque, erro de digitação, conta travada).</summary>
+    public static readonly AcessoResultado[] FalhasAcesso =
+    {
+        AcessoResultado.SenhaIncorreta, AcessoResultado.UsuarioDesconhecido, AcessoResultado.UsuarioDesabilitado,
+        AcessoResultado.Bloqueado, AcessoResultado.LimiteDeTaxa, AcessoResultado.ContaMicrosoft365,
+    };
+
+    public Task<List<string>> ListarUsuariosAcessosAsync() =>
+        _db.AcessoLogs.AsNoTracking().Select(a => a.Usuario).Distinct().OrderBy(x => x).Take(500).ToListAsync();
 }
 
 /// <summary>Colunas ordenáveis das tabelas da Auditoria (as mesmas das exportações).</summary>

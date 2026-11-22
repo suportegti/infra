@@ -280,6 +280,18 @@ chave do Microsoft 365 e o envio de e-mail (SMTP ou Microsoft 365) ficam em
 do aplicativo tem data de vencimento com aviso. O login com Microsoft 365 exige o
 portal em HTTPS. Ver `docs/IMPLANTACAO.md`, seção 7.1.
 
+## E-mails, monitoramento e HTTPS interno
+
+- **E-mail ao criar usuário**: link do portal, usuário e senha temporária (contas
+  Microsoft 365 recebem só o aviso para entrar pelo botão da Microsoft).
+- **E-mails enviados**: tela que lista cada e-mail do portal, com a funcionalidade que
+  disparou e o resultado (sem guardar o conteúdo).
+- **Tentativas de acesso**: tela própria, com filtros por período, usuário, IP e resultado.
+- **Logoff em lote** das sessões desconectadas, marcando cada sessão na tela Sessões.
+- **HTTPS na rede interna** com CA própria (`deploy\web\configurar-https.ps1`), para o
+  login com Microsoft 365 funcionar acessando o portal por IP ou nome interno. Ver
+  `docs/HTTPS.md`.
+
 ## Tabelas ordenáveis e período padrão
 
 Em Sessões, Relatórios e Auditoria, clique no título da coluna para ordenar

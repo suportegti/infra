@@ -12,6 +12,25 @@ function toggleTheme() {
     }
 }
 
+// ── Mantém o tema escolhido ao navegar entre os menus ───────────────────────
+// A navegação do Blazor ("enhanced navigation") atualiza o <html> com o que vem
+// do servidor, que não tem data-theme: o atributo sumia e a tela voltava ao tema
+// escuro. Sempre que o atributo mudar sem ser pelo botão, reaplica o tema salvo.
+function temaSalvo() {
+    try { return localStorage.getItem('rdsmonitor-theme') === 'light' ? 'light' : 'dark'; }
+    catch (e) { return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'; }
+}
+function aplicarTemaSalvo() {
+    var tema = temaSalvo();
+    if (document.documentElement.getAttribute('data-theme') !== tema)
+        document.documentElement.setAttribute('data-theme', tema);
+}
+new MutationObserver(aplicarTemaSalvo)
+    .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+if (window.Blazor && Blazor.addEventListener) {
+    try { Blazor.addEventListener('enhancedload', aplicarTemaSalvo); } catch (e) { }
+}
+
 function toggleNav() {
     var shell = document.querySelector('.app-shell');
     if (shell) {
@@ -89,4 +108,12 @@ document.addEventListener('change', function (e) {
     if (!sel) return;
     var form = sel.closest('form');
     if (form) form.setAttribute('data-tipo', sel.value);
+});
+
+// Cadastro de usuário: "Gerar senha temporária e enviar por e-mail" esconde o campo de senha manual
+document.addEventListener('change', function (e) {
+    var chk = e.target.closest && e.target.closest('input.gerar-senha');
+    if (!chk) return;
+    var form = chk.closest('form');
+    if (form) form.setAttribute('data-gerar', chk.checked ? '1' : '0');
 });
